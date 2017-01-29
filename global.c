@@ -1,41 +1,49 @@
-#include "glboal.h"
+#include "global.h"
 
-void delay(uint32_t seconds) 
+void global_init()
+{
+	opterr = 0;
+	err_msg = "<error>: ";
+	log_msg = "<log>: ";
+}
+
+void delay(uint32_t seconds)
 {
 	uint32_t delay_time = time(0) + seconds;
 	while (time(0) < delay_time);
 }
 
-void lock_cfg(config_t *cf, char *fn)
+struct flock *lock_cfg(FILE *fd)
 {
-	while(1)
+	int32_t fd;
+	struct flock *fl = (struct flock *fl)malloc(sizeof(struct flock));
+	*fl.l_type = F_WRLCK;
+	*fl.l_whence = SEEK_SET;
+	*fl.l_start = 0;
+	*fl.l_len = 0;
+	*fl.l_pid = getpid();
+
+	//lock the config file for writing
+	if(fcntl(fd, F_SETLKW, fl) < 0)
 	{
-		//intialize the config object
-		config_init(cf);
-
-		//check for any errors in the config file
-		if(!config_read_file(cf, fn))
-		{
-			fprintf(stderr, "%s%s:%d - %s\n", err_msg, config_error_file(cf), config_error_line(cf), config_error_text(cf));
-			config_destroy(cf);
-			return 1;
-		}
-
-		//check the current stauts of the file lock
-		lock_setting = config_lookup(cf, "lock");
-		if(config_setting_get_int(lock_setting) == 1)
-		{
-			//release cf and try again
-			config_destroy(cf);
-		}
-		else
-		{
-			//claim the lock and write to file
-			config_setting_set_int(lock_setting, 1);
-			config_write_file(cf, "global.cfg");
-			break;
-		}
+		fprintf(stderr, "%ssomething went wrong while attempting to lock the .cfg file (errno: %d)\n", err_msg, errno);
+		return NULL;
 	}
+
+	return fl;
 }
-onfig_t cf_local, *cf;
-	config_setting_t *lock_setting;
+
+int8_t unlock_cfg(struct flock *fl)
+{
+	*fl.l_type = F_UNLCK;
+
+	//unlock the config file
+	if(fcntl(fd, F_SETLK, fl) < 0)
+	{
+		fprintf(stderr, "%ssomething went wrong while attempting to unlock the .cfg file (errno: %d)\n", err_msg, errno);
+		return -1;
+	}
+
+	free(fl);
+	return 0;
+}

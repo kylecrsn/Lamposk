@@ -1,13 +1,13 @@
 # Ciosk
 A C implementation of a distributed ticketing kiosk system based on Lamport's Bakery Algorithm
-NOTE: TO shutdown the datacenters, use ctrl^c, then reset the "running flag" in the .cfg to 0 for any system that has it as 1
+NOTE: To shutdown the datacenters, use ctrl^c, then reset the "running flag" in the .cfg to 0 for any system that has it as 1
 
 ## About
-#####Assumptions
+##### Assumptions
 - Using TCP sockets, one kiosk can only talk to one client at a time, thus up to X independent client-datacenter transactions can occur at once, where X is the number of datacenters
 - Used getopt.h for command line parsing, libconfig.h for configuration file parsing, and a slew of networking libraries for system communication
 
-## Project Instruction Summary
+## Project Summary
 ### Generals
 - 1 central ticket pool
 - 5 datacenters (kiosks)

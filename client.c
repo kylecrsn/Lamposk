@@ -1,6 +1,6 @@
 #include "client.h"
 
-int client_handler(config_t *cf, config_setting_t *lock_setting, int msg_delay)
+int client_handler()
 {
 	int status = 0;
 	int msg_buf_max = 4096;

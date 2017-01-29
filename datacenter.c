@@ -1,6 +1,6 @@
 #include "datacenter.h"
 
-int datacenter_handler(config_t *cf, config_setting_t *lock_setting, int msg_delay)
+int datacenter_handler()
 {
 	request_sig = 0;
 	claimed_sig = 0;

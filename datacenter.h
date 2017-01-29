@@ -5,7 +5,7 @@
 #include "global.h"
 
 /*functions*/
-int datacenter_handler(config_t *cf, config_setting_t *lock_setting, int msg_delay);
+int datacenter_handler();
 void *client_recv_thread(void *args);
 void *datacenter_recv_thread(void *args);
 void *datacenter_send_thread(void *args);

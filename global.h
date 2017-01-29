@@ -7,6 +7,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <stdbool.h>
 #include <inttypes.h>
 #include <getopt.h>
@@ -44,7 +45,10 @@ typedef struct ret_struct
 }ret_obj;
 
 /*functions*/
-void delay(int secs);
+void global_init()
+void delay(uint32_t seconds);
+struct flock *lock_cfg(FILE *fd);
+int8_t unlock_cfg(struct flock *fl);
 
 /*variables*/
 char *err_msg;
