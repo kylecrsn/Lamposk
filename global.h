@@ -21,12 +21,21 @@
 #include <libconfig.h>
 
 /*structs*/
-typedef struct datacenter_obj
+typedef struct packet
 {
-	int id;
-	int running;
+	uint8_t instr;
+	uint32_t p_id;
+	uint32_t p_clk;
+	uint32_t t_amt;
+}packet __attribute__((packed));
+
+typedef struct dc_obj
+{
+	uint32_t id;
+	uint8_t online;
 	char *hostname;
-}datacenter_obj;
+}dc_obj;
+
 typedef struct arg_struct
 {
 	int id;
@@ -39,6 +48,7 @@ typedef struct arg_struct
 	char *hostname;
 	datacenter_obj *datacenters;
 }arg_obj;
+
 typedef struct ret_struct
 {
 	int ret;

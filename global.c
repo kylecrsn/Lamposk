@@ -33,7 +33,7 @@ struct flock *lock_cfg(FILE *fd)
 	return fl;
 }
 
-int8_t unlock_cfg(struct flock *fl)
+int8_t unlock_cfg(FILE *fd, struct flock *fl)
 {
 	*fl.l_type = F_UNLCK;
 

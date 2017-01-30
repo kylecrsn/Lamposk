@@ -37,51 +37,75 @@ int datacenter_handler()
 	pthread_t datacenter_send_thread_id;
 	pthread_t stdin_thread_id;
 
-	//read in datacenter values from locked config file
-	config_lookup_int(cf, "datacenter.ticket_pool", &ticket_pool);
-	config_lookup_int(cf, "datacenter.client_recv_port", &client_recv_port);
-	config_lookup_int(cf, "datacenter.datacenter_recv_port", &datacenter_recv_port);
-	datacenter_addr_settings = config_lookup(cf, "datacenter.addresses");
-	datacenter_count = config_setting_length(datacenter_addr_settings);
-	datacenters = (datacenter_obj *)malloc(datacenter_count * sizeof(datacenter_obj));
-	for(i = 0; i < datacenter_count; i++)
-	{
-		datacenter_addr_elem_setting = config_setting_get_elem(datacenter_addr_settings, i);
-		config_setting_lookup_int(datacenter_addr_elem_setting, "running", &datacenter_addr_running);
-		if(datacenter_addr_running == 0)
-		{
-			break;
-		}
-	}
+	/*
+		REVISED VARIABLES
+	*/
+	int32_t i_dc = -1;
+	config_t cf_local;
+	config_t *cf;
+	struct flock *fl;
+	FILE *fd;
 
-	//all datacenters are running
-	if(datacenter_addr_running == 1)
+	/*
+		REVISED CODE
+	*/
+
+	//open and lock the config file
+	fd = open("global.cfg", O_RDWR);
+	fl = lock_cfg(fd);
+	if(fl == NULL)
 	{
-		fprintf(stderr, "%scan't start another datacenter, all datacenters specified by global.cfg are currently running\n", err_msg);
-		config_setting_set_int(lock_setting, 0);
-		config_write_file(cf, "global.cfg");
-		config_destroy(cf);
 		return 1;
 	}
 
-	//read kiosk info into object
-	config_setting_lookup_int(datacenter_addr_elem_setting, "id", &datacenter.id);
-	config_setting_lookup_string(datacenter_addr_elem_setting, "hostname", &hostname);
-	datacenter.hostname = (char *)malloc(strlen(hostname) + 1);
-	memcpy(datacenter.hostname, hostname, strlen(hostname) + 1);
-	datacenter_addr_running_setting = config_setting_get_member(datacenter_addr_elem_setting, "running");
-
-	//set the running and lock values
-	config_setting_set_int(datacenter_addr_running_setting, 1);
-	for(i = 0; i < datacenter_count; i++)
+	//initialize the config object
+	cf = &cf_local;
+	config_init(cf);
+	if(!config_read_file(cf, "global.cfg"))
 	{
-		datacenter_addr_elem_setting = config_setting_get_elem(datacenter_addr_settings, i);
-		config_setting_lookup_int(datacenter_addr_elem_setting, "id", &datacenters[i].id);
-		config_setting_lookup_int(datacenter_addr_elem_setting, "running", &datacenters[i].running);
-		config_setting_lookup_string(datacenter_addr_elem_setting, "hostname", &hostname);
-		datacenters[i].hostname = (char *)malloc(strlen(hostname) + 1);
-		memcpy(datacenters[i].hostname, hostname, strlen(hostname) + 1);
+		fprintf(stderr, "%sthe datacenter encountered an issue while reading from config file: %s:%d - %s\n", 
+			err_msg, config_error_file(cf), config_error_line(cf), config_error_text(cf));
+		config_destroy(cf);
+		unlock_cfg(fd, fl);
+		close(fd);
+		return 1;
 	}
+
+	//lookup config values for the datacenter
+	config_lookup_int(cf, "delay", &msg_delay);
+	config_lookup_int(cf, "datacenter.ticket_pool", &ticket_pool);
+	config_lookup_int(cf, "datacenter.client_recv_port", &c_recv_port);
+	config_lookup_int(cf, "datacenter.datacenter_recv_port", &dc_recv_port);
+	dc_addr_settings = config_lookup(cf, "datacenter.addresses");
+	dc_count = config_setting_length(dc_addr_settings);
+	dc_sys = (dc_obj *)malloc(dc_count * sizeof(dc_obj));
+	for(i = 0; i < dc_count; i++)
+	{
+		dc_addr_elem_setting = config_setting_get_elem(dc_addr_settings, i);
+		config_setting_lookup_int(dc_addr_elem_setting, "id", &(dc_sys[i]->id));
+		config_setting_lookup_int(dc_addr_elem_setting, "online", &(dc_sys[i]->online));
+		config_setting_lookup_string(dc_addr_elem_setting, "hostname", &hostname);
+		dc_sys[i] = (char *)malloc(strlen(hostname) + 1);
+		mempcy(dc_sys[i].hostname, hostname, strlen(hostname) + 1);
+		//set the index for the first availble datacenter not currently online
+		if(dc_sys[i]->online == 0 && i_dc == -1)
+		{
+			i_dc = i;
+		}
+	}
+
+	//all datacenters are already online
+	if(dc_sys[i-1]->online == 1)
+	{
+		fprintf(stderr, "%scan't start another datacenter, all datacenters specified by global.cfg are currently online\n", err_msg);
+		config_destroy(cf);
+		unlock_cfg(fd, fl);
+		close(fd);
+		return 1;
+	}
+	dc_addr_online_setting = config_setting_get_member(dc_addr_elem_setting, "online");
+
+
 	config_setting_set_int(lock_setting, 0);
 	config_write_file(cf, "global.cfg");
 	config_destroy(cf);
@@ -1279,3 +1303,6 @@ void *stdin_thread(void *args)
 	fflush(stdout);
 	return ((void *)thread_rets);
 }
+
+
+
