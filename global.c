@@ -3,8 +3,9 @@
 void global_init()
 {
 	opterr = 0;
-	err_msg = "<error>: ";
-	log_msg = "<log>: ";
+	err_m = "[ERR|CLK:";
+	log_m = "[LOG|CLK:";
+	cls_m = "]:"
 }
 
 void delay(uint32_t seconds)
@@ -46,4 +47,16 @@ int8_t unlock_cfg(FILE *fd, struct flock *fl)
 
 	free(fl);
 	return 0;
+}
+
+void print_tickets(int32_t x)
+{
+	if(x == 1)
+	{
+		fprintf(stdout, "ticket");
+	}
+	else
+	{
+		fprintf(stdout, "tickets");
+	}
 }

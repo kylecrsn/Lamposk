@@ -2,7 +2,7 @@
 
 int datacenter_handler()
 {
-	request_sig = 0;
+/*	request_sig = 0;
 	claimed_sig = 0;
 	release_sig = 0;
 	terminate_sig = 0;
@@ -15,36 +15,49 @@ int datacenter_handler()
 	int datacenter_addr_running;
 	int datcenter_addr_id;
 	int client_recv_port;
-	int datacenter_recv_port;
+	int datacenter_recv_port;*/
 /*	int client_recv_ret_val;
 	int datacenter_recv_ret_val;
 	int datacenter_send_ret_val;*/
-	const char *hostname;
-	config_setting_t *datacenter_addr_settings;
+	// const char *hostname;
+/*	config_setting_t *datacenter_addr_settings;
 	config_setting_t *datacenter_addr_elem_setting;
 	config_setting_t *datacenter_addr_running_setting;
 	datacenter_obj datacenter;
-	datacenter_obj *datacenters;
-	arg_obj *client_recv_args;
-	arg_obj *datacenter_recv_args;
-	arg_obj *datacenter_send_args;
-	arg_obj *stdin_args;
+	datacenter_obj *datacenters;*/
+
 /*	ret_obj *client_recv_rets;
 	ret_obj *datacenter_recv_rets;
 	ret_obj *datacenter_send_rets;*/
-	pthread_t client_recv_thread_id;
-	pthread_t datacenter_recv_thread_id;
-	pthread_t datacenter_send_thread_id;
-	pthread_t stdin_thread_id;
+
 
 	/*
 		REVISED VARIABLES
 	*/
+	char *fnc_m = "datacenter_handler";
+	const char *hn;
 	int32_t i_dc = -1;
+	int32_t i;
+	int32_t dc_addr_count;
+	int32_t ticket_pool;
+	int32_t ticket_pool_init;
 	config_t cf_local;
 	config_t *cf;
 	struct flock *fl;
 	FILE *fd;
+	config_setting_t *dc_addr_settings;
+	config_setting_t *dc_addr_elem_setting;
+	config_setting_t *dc_addr_online_setting;
+	datacenter_obj *dc_sys;
+	pthread_t cl_lstn_thread_id;
+	pthread_t dc_bcst_thread_id;
+	pthread_t dc_lstn_thread_id;
+	pthread_t stdin_thread_id;
+
+	arg_obj *cl_lstn_args;
+	arg_obj *dc_bcst_args;
+	arg_obj *dc_lstn_args;
+	arg_obj *stdin_args;
 
 	/*
 		REVISED CODE
@@ -63,30 +76,36 @@ int datacenter_handler()
 	config_init(cf);
 	if(!config_read_file(cf, "global.cfg"))
 	{
-		fprintf(stderr, "%sthe datacenter encountered an issue while reading from config file: %s:%d - %s\n", 
-			err_msg, config_error_file(cf), config_error_line(cf), config_error_text(cf));
+		fprintf(stderr, "%s%d%s (%s) encountered an issue while reading from config file: %s:%d - %s\n", 
+			err_m, 0, cls_m, fnc_m, config_error_file(cf), config_error_line(cf), config_error_text(cf));
 		config_destroy(cf);
 		unlock_cfg(fd, fl);
 		close(fd);
 		return 1;
 	}
 
-	//lookup config values for the datacenter
+	//get general config values
 	config_lookup_int(cf, "delay", &msg_delay);
-	config_lookup_int(cf, "datacenter.ticket_pool", &ticket_pool);
-	config_lookup_int(cf, "datacenter.client_recv_port", &c_recv_port);
-	config_lookup_int(cf, "datacenter.datacenter_recv_port", &dc_recv_port);
-	dc_addr_settings = config_lookup(cf, "datacenter.addresses");
-	dc_count = config_setting_length(dc_addr_settings);
-	dc_sys = (dc_obj *)malloc(dc_count * sizeof(dc_obj));
-	for(i = 0; i < dc_count; i++)
+	config_lookup_int(cf, "dc.ticket_pool_init", &ticket_pool_init);
+	config_lookup_int(cf, "dc.ticket_pool", &ticket_pool);
+	config_lookup_int(cf, "dc.cl_recv_port", &c_recv_port);
+	config_lookup_int(cf, "dc.dc_recv_port_base", &dc_recv_port);
+	dc_addr_settings = config_lookup(cf, "dc.addrs");
+	dc_addr_count = config_setting_length(dc_addr_settings);
+	ticket_pool_max = ticket_pool;
+
+	//populate an array with all of the datacenter configs
+	dc_sys = (dc_obj *)malloc(dc_addr_count * sizeof(dc_obj));
+	for(i = 0; i < dc_addr_count; i++)
 	{
 		dc_addr_elem_setting = config_setting_get_elem(dc_addr_settings, i);
 		config_setting_lookup_int(dc_addr_elem_setting, "id", &(dc_sys[i]->id));
 		config_setting_lookup_int(dc_addr_elem_setting, "online", &(dc_sys[i]->online));
-		config_setting_lookup_string(dc_addr_elem_setting, "hostname", &hostname);
-		dc_sys[i] = (char *)malloc(strlen(hostname) + 1);
-		mempcy(dc_sys[i].hostname, hostname, strlen(hostname) + 1);
+		config_setting_lookup_string(dc_addr_elem_setting, "hostname", &hn);
+		dc_sys[i].clk = 0;
+		dc_sys[i].hostname = (char *)malloc(strlen(hn) + 1);
+		mempcy(dc_sys[i].hostname, hn, strlen(hn) + 1);
+
 		//set the index for the first availble datacenter not currently online
 		if(dc_sys[i]->online == 0 && i_dc == -1)
 		{
@@ -97,41 +116,40 @@ int datacenter_handler()
 	//all datacenters are already online
 	if(dc_sys[i-1]->online == 1)
 	{
-		fprintf(stderr, "%scan't start another datacenter, all datacenters specified by global.cfg are currently online\n", err_msg);
+		fprintf(stderr, "%s%d%s (%s) can't start another datacenter, all datacenters specified by global.cfg are currently online\n", 
+			err_m, dc_sys[i_dc], cls_m, fnc_m,);
 		config_destroy(cf);
 		unlock_cfg(fd, fl);
 		close(fd);
 		return 1;
 	}
-	dc_addr_online_setting = config_setting_get_member(dc_addr_elem_setting, "online");
 
-
-	config_setting_set_int(lock_setting, 0);
-	config_write_file(cf, "global.cfg");
+	//Close and unlock the config file
 	config_destroy(cf);
-	memset(clock_queue, 9, sizeof(clock_queue));
-	memset(id_queue, 9, sizeof(id_queue));
+	unlock_cfg(fd, fl);
+	close(fd);
 
-	fprintf(stdout, "%sticket pool: %d\n", log_msg, ticket_pool);
-	fprintf(stdout, "%sclient receive port: %d\n", log_msg, client_recv_port);
-	fprintf(stdout, "%sdatacenter receive port: %d\n", log_msg, datacenter_recv_port);
-	fprintf(stdout, "%sdatacenter ID: %d\n", log_msg, datacenter.id);
-	fprintf(stdout, "%sdatcenter hostname: %s\n", log_msg, datacenter.hostname);
+	//log datacenter metadata
+	fprintf(stdout, "========================\n|   Datacenter #%d Log   |\n========================\n\n");
+	fprintf(stdout, "- Boot Time: %s\n", asctime(localtime(time())));
+	fprintf(stdout, "- ID: %d\n", dc_sys[i_dc].id);
+	fprintf(stdout, "- Initial Clock: %d\n", dc_sys[i_dc]);
+	fprintf(stdout, "- Initial Ticket Pool: %d\n", ticket_pool_init);
+	fprintf(stdout, "- Current Ticket Pool: %d\n", ticket_pool);
+	fprintf(stdout, "- Client Listen Port: %d\n", cl_intf_port);
+	fprintf(stdout, "- Datacenter Broadcast Base Port: %d\n",dc_ipc_port);
+	fprintf(stdout, "- Datacenter Hostname: %s\n\n\n", dc_sys[i_dc].hostname);
 
-	//spawn client_recv thread
-	client_recv_args = (arg_obj *)malloc(sizeof(struct arg_struct));
-	client_recv_args->id = datacenter.id;
-	client_recv_args->pool = &ticket_pool;
-	client_recv_args->requested = &tickets_requested;
-	client_recv_args->count = datacenter_count;
-	client_recv_args->port = client_recv_port;
-	client_recv_args->hostname = datacenter.hostname;
+	//spawn cl_lstn_thread
+	cl_lstn_args = (arg_obj *)malloc(sizeof(arg_obj));
+	cl_lstn_args->port = client_recv_port;
+	cl_lstn_args->hostname = datacenter.hostname;
 	fflush(stdout);
-	status = pthread_create(&client_recv_thread_id, NULL, client_recv_thread, (void *)client_recv_args);
+	status = pthread_create(&cl_lstn_thread_id, NULL, cl_lstn_thread, (void *)cl_lstn_args);
 	if(status != 0)
 	{
-		fprintf(stderr, "%sdatacenter %d failed to spawn client_recv thread (status: %d/errno: %d)\n", 
-			err_msg, datacenter.id, status, errno);
+		fprintf(stderr, "%s%d%s (%s) failed to spawn cl_lstn_thread (errno: %s)\n", 
+			err_m, dc_sys[i_dc], cls_m, fnc_m, strerror(errno));
 		return 1;
 	}
 
@@ -149,7 +167,7 @@ int datacenter_handler()
 	if(status != 0)
 	{
 		fprintf(stderr, "%sdatacenter %d failed to spawn datacenter_recv thread (status: %d/errno: %d)\n", 
-			err_msg, datacenter.id, status, errno);
+			err_m, datacenter.id, status, strerror(errno));
 		return 1;
 	}
 
@@ -168,7 +186,7 @@ int datacenter_handler()
 	if(status != 0)
 	{
 		fprintf(stderr, "%sdatacenter %d failed to spawn datacenter_send thread (status: %d/errno: %d)\n", 
-			err_msg, datacenter.id, status, errno);
+			err_m, datacenter.id, status, strerror(errno));
 		return 1;
 	}
 
@@ -179,11 +197,11 @@ int datacenter_handler()
 	if(status != 0)
 	{
 		fprintf(stderr, "%sdatacenter %d failed to spawn stdin thread (status: %d/errno: %d)\n", 
-			err_msg, datacenter.id, status, errno);
+			err_m, datacenter.id, status, strerror(errno));
 		return 1;
 	}
 
-	fprintf(stdout, "%sfinished spawning threads\n", log_msg);
+	fprintf(stdout, "%sfinished spawning threads\n", log_m);
 
 	//terminate datacenter
 	while(1)
@@ -198,7 +216,7 @@ int datacenter_handler()
 		}
 	}
 
-	fprintf(stdout, "%sfinished canceling threads\n", log_msg);
+	fprintf(stdout, "%sfinished canceling threads\n", log_m);
 
 	//free the hostname memory
 	free(datacenter.hostname);
@@ -213,7 +231,7 @@ int datacenter_handler()
 		config_init(cf);
 		if(!config_read_file(cf, "global.cfg"))
 		{
-			fprintf(stderr, "%s%s:%d - %s\n", err_msg, config_error_file(cf), config_error_line(cf), config_error_text(cf));
+			fprintf(stderr, "%s%s:%d - %s\n", err_m, config_error_file(cf), config_error_line(cf), config_error_text(cf));
 			config_destroy(cf);
 			return 1;
 		}
@@ -249,201 +267,210 @@ int datacenter_handler()
 	return 0;
 }
 
-//act a frontend for communicating with the client
-void *client_recv_thread(void *args)
+//acts as a frontend for communicating with the client
+void *cl_lstn_thread(void *args)
 {
-	int msg_buf_max = 4096;
-	int sockopt = 1;
-	int status;
-	int id;
-	int port;
-	int client_recv_sock_fd;
-	int client_rspd_sock_fd;
-	int *pool;
-	int *requested;
-	int msg_delay;
-	int ticket_amount;
+	int32_t msg_buf_max = 4096;
+	int32_t sockopt = 1;
+	int32_t status;
+	int32_t cl_lstn_sock_fd;
+	int32_t cl_rspd_sock_fd;
+	uint32_t port;
+	uint32_t *pool;
+	uint32_t *requested;
+	uint32_t ticket_amount;
 	char msg_buf[msg_buf_max];
+	char *fnc_m = "cl_lstn_thread";
 	char *hostname;
 	char *end;
-	struct sockaddr_in client_recv_addr;
-	struct sockaddr_in client_rspd_addr;
-	socklen_t client_recv_addr_len;
-	socklen_t client_rspd_addr_len;
+	struct sockaddr_in cl_lstn_addr;
+	struct sockaddr_in cl_rspd_addr;
+	socklen_t cl_lstn_addr_len;
+	socklen_t cl_rspd_addr_len;
 	arg_obj *thread_args = (arg_obj *)args;
 	ret_obj *thread_rets = (ret_obj *)malloc(sizeof(ret_obj));
 
+	//read out data packed in the args parameter
 	fflush(stdout);
-	id = thread_args->id;
-	pool = thread_args->pool;
-	requested = thread_args->requested;
-	msg_delay = thread_args->delay;
+	fflush(stderr);
 	port = thread_args->port;
 	hostname = thread_args->hostname;
 	free(thread_args);
+	thread_rets->ret = 0;
 
-	//setup the client_recv address object
-	client_recv_addr_len = sizeof(client_recv_addr);
-	memset((char *)&client_recv_addr, 0, client_recv_addr_len);
-	client_recv_addr.sin_family = AF_INET;
-	client_recv_addr.sin_addr.s_addr = inet_addr(hostname);
-	client_recv_addr.sin_port = htons(port);
+	//setup the cl_lstn address object
+	cl_lstn_addr_len = sizeof(cl_lstn_addr);
+	memset((char *)&cl_lstn_addr, 0, cl_lstn_addr_len);
+	cl_lstn_addr.sin_family = AF_INET;
+	cl_lstn_addr.sin_addr.s_addr = inet_addr(hostname);
+	cl_lstn_addr.sin_port = htons(port);
 
+	//open a server socket in the datacenter to accept incoming client requests
+	status = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if(status < 0)
+	{
+		fprintf(stderr, "%s%d%s (%s) failed to open a socket (errno: %s)\n", 
+			err_m, dc->clk, cls_m, fnc_m, strerror(errno));
+		thread_rets->ret = 1;
+	}
+	cl_lstn_sock_fd = status;
+	fprintf(stdout, "%s%d%s (%s) finished initializing a socket for client connections\n", 
+			log_m, dc->clk, cls_m, fnc_m);
+
+	//check if the system is still holding onto the port after a recent restart
+	status = setsockopt(cl_lstn_sock_fd, SOL_SOCKET, SO_REUSEADDR, (const void *)&sockopt, sizeof(int));
+	if(status < 0)
+	{
+		fprintf(stderr, "%s%d%s (%s) can't bind to port due to a recent program restart (errno: %s)\n", 
+			err_m, dc->clk, cls_m, fnc_m, strerror(errno));
+		thread_rets->ret = 1;
+	}
+	fprintf(stdout, "%s%d%s (%s) finished setting the socket to be reusable\n", 
+			log_m, dc->clk, cls_m, fnc_m);
+
+	//bind to a port on the datacenter
+	status = bind(cl_lstn_sock_fd, (struct sockaddr *)&cl_lstn_addr, cl_lstn_addr_len);
+	if(status < 0)
+	{
+		fprintf(stderr, "%s%d%s (%s) failed to bind to the specified port (errno: %s)\n", 
+			err_m, dc->clk, cls_m, fnc_m, strerror(errno));
+		thread_rets->ret = 1;
+	}
+	fprintf(stdout, "%s%d%s (%s) finished binding to the socket\n", 
+			log_m, dc->clk, cls_m, fnc_m);
+
+	//listen to the port for an incoming client connection
+	status = listen(cl_lstn_sock_fd, 1);
+	if(status < 0)
+	{
+		fprintf(stderr, "%s%d%s (%s) failed to listen to the port for clients (errno: %s)\n", 
+			err_m, dc->clk, cls_m, fnc_m, strerror(errno));
+		thread_rets->ret = 1;
+	}
+	cl_rspd_addr_len = sizeof(cl_rspd_addr);
+	fprintf(stdout, "%s%d%s (%s) now listening for client connections\n", 
+			log_m, dc->clk, cls_m, fnc_m);
+
+	//continuosly accept new client connections until an error occurs or the thread is ended
 	while(1)
 	{
-		fprintf(stdout, "%scurrent ticket pool amount: %d\n", log_msg, *pool);
-
-		//open a datacenter socket
-		status = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-		if(status < 0)
-		{
-			fprintf(stderr, "%sdatacenter %d failed to open a socket (status: %d/errno: %d)\n", 
-				err_msg, id, status, errno);
-			thread_rets->ret = 1;
-			break;
-		}
-		client_recv_sock_fd = status;
-
-		//check if the system is still holding onto the port after a recent restart
-		status = setsockopt(client_recv_sock_fd, SOL_SOCKET, SO_REUSEADDR, (const void *)&sockopt , sizeof(int));
-		if(status < 0)
-		{
-			fprintf(stderr, "%sdatacenter %d can't bind to port due to the system still holding the port resources from a recent \
-				restart (status: %d/errno: %d)\n", err_msg, id, status, errno);
-			thread_rets->ret = 1;
-			break;
-		}
-
-		//bind to a port on the datacenter
-		status = bind(client_recv_sock_fd, (struct sockaddr *)&client_recv_addr, client_recv_addr_len);
-		if(status < 0)
-		{
-			fprintf(stderr, "%sdatacenter %d failed to bind to the specified port (status: %d/errno: %d)\n", 
-				err_msg, id, status, errno);
-			thread_rets->ret = 1;
-			break;
-		}
-
-		//listen to the port
-		client_rspd_addr_len = sizeof(client_rspd_addr);
-		status = listen(client_recv_sock_fd, 16);
-		if(status < 0)
-		{
-			fprintf(stderr, "%sdatacenter %d failed to listen for clients (status: %d/errno: %d)\n", 
-				err_msg, id, status, errno);
-			thread_rets->ret = 1;
-			break;
-		}
+		fprintf(stdout, "%s%d%s (%s) ticket pool amount before accepting a new client: %d\n", 
+			log_m, dc->clk, cls_m, fnc_m, *pool);
 
 		//accept connection from client
-		status = accept(client_recv_sock_fd, (struct sockaddr *)&client_rspd_addr, &client_rspd_addr_len);
+		status = accept(cl_lstn_sock_fd, (struct sockaddr *)&cl_rspd_addr, &ccl_rspd_addr_len);
 		if(status < 0)
 		{
-			fprintf(stderr, "%sdatacenter %d failed to accept a connection from a client (status: %d/errno: %d)\n", 
-				err_msg, id, status, errno);
+			fprintf(stderr, "%s%d%s (%s) failed to accept a connection from a client (errno: %s)\n", 
+				err_m, dc->clk, cls_m, fnc_m, strerror(errno));
 			thread_rets->ret = 1;
 			break;
 		}
-		client_rspd_sock_fd = status;
+		cl_rspd_sock_fd = status;
+		fprintf(stdout, "%s%d%s (%s) accepted a new client connection\n", 
+			log_m, dc->clk, cls_m, fnc_m);
 
 		//wait to receive a message from the client
 		memset(msg_buf, 0, msg_buf_max);
-		status = recv(client_rspd_sock_fd, msg_buf, msg_buf_max, 0);
+		status = recv(cl_rspd_sock_fd, msg_buf, msg_buf_max, 0);
 		if(status != msg_buf_max)
 		{
-			fprintf(stderr, "%sdatacenter %d encountered an issue while reading the message (status: %d/errno: %d)\n", 
-				err_msg, id, status, errno);
+			fprintf(stderr, "%s%d%s (%s) encountered an issue while reading the message (status: %d/errno: %d)\n", 
+				err_m, dc->clk, cls_m, fnc_m, status, strerror(errno));
 			thread_rets->ret = 1;
 			break;
 		}
+		fprintf(stdout, "%s%d%s (%s) received a request from a client\n", 
+			log_m, dc->clk, cls_m, fnc_m);
 
 		//convert message to an int
 		errno = 0;
 		ticket_amount = strtol(msg_buf, &end, 10);
-		if(*end != 0 || errno != 0 || ticket_amount < 0 || ticket_amount > 100)
+		if(*end != 0 || errno != 0)
 		{
-			fprintf(stderr, "%sdatacenter %d encountered an error while converting request message (errno: %d)", 
-				err_msg, id, errno);
+			fprintf(stderr, "%s%d%s (%s) encountered an error while converting client ticket request message (errno: %s)\n", 
+				err_m, dc->clk, cls_m, fnc_m, strerror(errno));
 			thread_rets->ret = 1;
 			break;
 		}
 
-		request_sig = 1;
-		while(claimed_sig == 0);
-		request_sig = 0;
+//WAIT FOR THREADS TO NEGOTIATE ACCESS TO TICKET POOL
 
-		//send the client the number indicating whether the request message was accepted
+		fprintf(stdout, "%s%d%s (%s) ticket pool control has been obtained, processing request\n", 
+			log_m, dc->clk, cls_m, fnc_m);
+
+		//set a flag indicating whether the request message was accepted
 		memset(msg_buf, 0, msg_buf_max);
 		if(ticket_amount > *pool)
 		{
 			strcpy(msg_buf, "0");
-			if(ticket_amount == 1)
-			{
-				fprintf(stdout, "%sdatacenter %d rejected a request for %d ticket from its client\n", 
-					log_msg, id, ticket_amount);
-			}
-			else
-			{
-				fprintf(stdout, "%sdatacenter %d rejected a request for %d tickets from its client\n", 
-					log_msg, id, ticket_amount);
-			}
+			fprintf(stdout, "%s%d%s (%s) rejected a request from a client for %d ", ticket_amount);
+			print_tickets(ticket_amount);
+			fprintf(stdout, " (%d ", *pool);
+			print_tickets(*pool);
+			fprintf(stdout, " remaining in the pool)\n");
+			fflush(stdout);
 		}
 		else
 		{
 			*requested = ticket_amount;
+			*pool -= *requested;
 			strcpy(msg_buf, "1");
-			if(ticket_amount == 1)
-			{
-				fprintf(stdout, "%sdatacenter %d accepted a request for %d ticket from its client\n", 
-					log_msg, id, ticket_amount);
-			}
-			else
-			{
-				fprintf(stdout, "%sdatacenter %d accepted a request for %d tickets from its client\n", 
-					log_msg, id, ticket_amount);
-			}
+			fprintf(stdout, "%s%d%s (%s) accepted a request from a client for %d ", ticket_amount);
+			print_tickets(ticket_amount);
+			fprintf(stdout, " (%d ", *pool);
+			print_tickets(*pool);
+			fprintf(stdout, " remaining in the pool)\n");
+			fflush(stdout);
 		}
 
-		while(release_sig == 0);
-		*pool -= *requested;
-		fprintf(stdout, "%squeue has been released\n", log_msg);
-		delay(2);
-		fprintf(stdout, "%sclient notified of sale completion\n", log_msg);
-		status = send(client_rspd_sock_fd, msg_buf, msg_buf_max, 0);
+		fprintf(stdout, "%s%d%s (%s) request completed, allowing release of ticket pool control\n", 
+			log_m, dc->clk, cls_m, fnc_m);
+
+//ALLOW THREADS TO RELEASE ACCESS OF TICKET POOL
+
+		//send the client the request results
+		status = send(cl_rspd_sock_fd, msg_buf, msg_buf_max, 0);
 		if(status != msg_buf_max)
 		{
-			fprintf(stderr, "%sdatacenter %d encoutnered an issue while sending response (status: %d/errno: %d)\n", 
-				err_msg, id, status, errno);
+			fprintf(stderr, "%s%d%s (%s) encountered an issue while sending the message (status: %d/errno: %s)\n", 
+				err_m, dc->clk, cls_m, fnc_m, status, strerror(errno));
 			thread_rets->ret = 1;
 			break;
 		}
+		fprintf(stdout, "%s%d%s (%s) sent the request results back to the client\n", 
+			log_m, dc->clk, cls_m, fnc_m);
 
-
-
-		//close the datacenter and client socket connections
-		status = close(client_rspd_sock_fd);
+		//close the response socket for the client
+		status = close(cl_rspd_sock_fd);
 		if(status < 0)
 		{
-			fprintf(stderr, "%sdatacenter %d failed to cleanly close the client_rspd socket (status: %d/errno: %d)\n", 
-				err_msg, id, status, errno);
+			fprintf(stderr, "%s%d%s (%s) failed to cleanly close the client response socket (errno: %s)\n", 
+				err_m, dc->clk, cls_m, fnc_m, strerror(errno));
 			thread_rets->ret = 1;
 			break;
 		}
-		status = close(client_recv_sock_fd);
-		if(status < 0)
-		{
-			fprintf(stderr, "%sdatacenter %d failed to cleanly close the client_recv socket (status: %d/errno: %d)\n", 
-				err_msg, id, status, errno);
-			thread_rets->ret = 1;
-			break;
-		}
+		fprintf(stdout, "%s%d%s (%s) closed the response point of the client connection\n", 
+			log_m, dc->clk, cls_m, fnc_m);
 
 		thread_rets->ret = 0;
-		release_sig = 0;
 	}
 
+	//close the datacenter's socket for incoming client requests
+	status = close(cl_lstn_sock_fd);
+	if(status < 0)
+	{
+			fprintf(stderr, "%s%d%s (%s) failed to cleanly close the datacenter's socket for client requests (errno: %s)\n", 
+				err_m, dc->clk, cls_m, fnc_m, strerror(errno));
+		thread_rets->ret = 1;
+		break;
+	}
+	fprintf(stdout, "%s%d%s (%s) closed the datacenter's socket for client requests\n", 
+			log_m, dc->clk, cls_m, fnc_m);
+
 	fflush(stdout);
-	return((void *)thread_rets);
+	fflush(stderr);
+	pthread_exit((void *)thread_rets);
 }
 
 //receive messages from other datacenters for synchronization
@@ -499,7 +526,7 @@ void *datacenter_recv_thread(void *args)
 		if(status < 0)
 		{
 			fprintf(stderr, "%sdatacenter_recv %d failed to open a socket (status: %d/errno: %d)\n", 
-				err_msg, id, status, errno);
+				err_m, id, status, strerror(errno));
 			thread_rets->ret = 1;
 			break;
 		}
@@ -510,7 +537,7 @@ void *datacenter_recv_thread(void *args)
 		if(status < 0)
 		{
 			fprintf(stderr, "%sdatacenter_recv %d can't bind to port due to the system still holding the port resources from a recent \
-				restart (status: %d/errno: %d)\n", err_msg, id, status, errno);
+				restart (status: %d/errno: %d)\n", err_m, id, status, strerror(errno));
 			thread_rets->ret = 1;
 			break;
 		}
@@ -520,7 +547,7 @@ void *datacenter_recv_thread(void *args)
 		if(status < 0)
 		{
 			fprintf(stderr, "%sdatacenter_recv %d failed to bind to the specified port (status: %d/errno: %d)\n", 
-				err_msg, id, status, errno);
+				err_m, id, status, strerror(errno));
 			thread_rets->ret = 1;
 			break;
 		}
@@ -531,7 +558,7 @@ void *datacenter_recv_thread(void *args)
 		if(status < 0)
 		{
 			fprintf(stderr, "%sdatacenter_recv %d failed to listen for clients (status: %d/errno: %d)\n", 
-				err_msg, id, status, errno);
+				err_m, id, status, strerror(errno));
 			thread_rets->ret = 1;
 			break;
 		}
@@ -541,7 +568,7 @@ void *datacenter_recv_thread(void *args)
 		if(status < 0)
 		{
 			fprintf(stderr, "%sdatacenter_recv %d failed to accept a connection from a client (status: %d/errno: %d)\n", 
-				err_msg, id, status, errno);
+				err_m, id, status, strerror(errno));
 			thread_rets->ret = 1;
 			break;
 		}
@@ -553,7 +580,7 @@ void *datacenter_recv_thread(void *args)
 		if(status != msg_buf_max)
 		{
 			fprintf(stderr, "%sdatacenter_recv %d encountered an issue while reading the message (status: %d/errno: %d)\n", 
-				err_msg, id, status, errno);
+				err_m, id, status, strerror(errno));
 			thread_rets->ret = 1;
 			break;
 		}
@@ -563,15 +590,15 @@ void *datacenter_recv_thread(void *args)
 		comm_flag = strtol(msg_buf, &end, 10);
 		if(*end != 0 || errno != 0)
 		{
-			fprintf(stderr, "%sdatacenter_recv %d encountered an error while converting comm_flag message (errno: %d)", 
-				err_msg, id, errno);
+			fprintf(stderr, "%sdatacenter_recv %d encountered an error while converting comm_flag message (errno: %s)", 
+				err_m, id, strerror(errno));
 			thread_rets->ret = 1;
 			break;
 		}
 
 		if(comm_flag == 0)
 		{
-			fprintf(stdout, "%sdatacenter_recv %d received a connection on comm 0\n", log_msg, id);
+			fprintf(stdout, "%sdatacenter_recv %d received a connection on comm 0\n", log_m, id);
 
 			//wait to receive a message from the client
 			memset(msg_buf, 0, msg_buf_max);
@@ -579,7 +606,7 @@ void *datacenter_recv_thread(void *args)
 			if(status != msg_buf_max)
 			{
 				fprintf(stderr, "%sdatacenter_recv %d encountered an issue while reading the message (status: %d/errno: %d)\n", 
-					err_msg, id, status, errno);
+					err_m, id, status, strerror(errno));
 				thread_rets->ret = 1;
 				break;
 			}
@@ -589,8 +616,8 @@ void *datacenter_recv_thread(void *args)
 			id_inc = strtol(msg_buf, &end, 10);
 			if(*end != 0 || errno != 0)
 			{
-				fprintf(stderr, "%sdatacenter_recv %d encountered an error while converting id_inc message (errno: %d)", 
-					err_msg, id, errno);
+				fprintf(stderr, "%sdatacenter_recv %d encountered an error while converting id_inc message (errno: %s)", 
+					err_m, id, strerror(errno));
 				thread_rets->ret = 1;
 				break;
 			}
@@ -601,7 +628,7 @@ void *datacenter_recv_thread(void *args)
 			if(status != msg_buf_max)
 			{
 				fprintf(stderr, "%sdatacenter_recv %d encountered an issue while reading the message (status: %d/errno: %d)\n", 
-					err_msg, id, status, errno);
+					err_m, id, status, strerror(errno));
 				thread_rets->ret = 1;
 				break;
 			}
@@ -611,8 +638,8 @@ void *datacenter_recv_thread(void *args)
 			clock_inc = strtol(msg_buf, &end, 10);
 			if(*end != 0 || errno != 0)
 			{
-				fprintf(stderr, "%sdatacenter_recv %d encountered an error while converting clock_inc message (errno: %d)", 
-					err_msg, id, errno);
+				fprintf(stderr, "%sdatacenter_recv %d encountered an error while converting clock_inc message (errno: %s)", 
+					err_m, id, strerror(errno));
 				thread_rets->ret = 1;
 				break;
 			}
@@ -672,11 +699,11 @@ void *datacenter_recv_thread(void *args)
 			if(status != msg_buf_max)
 			{
 				fprintf(stderr, "%sdatacenter_recv %d encoutnered an issue while sending response (status: %d/errno: %d)\n", 
-					err_msg, id, status, errno);
+					err_m, id, status, strerror(errno));
 				thread_rets->ret = 1;
 				break;
 			}
-			fprintf(stdout, "%sdatacenter_recv send %s\n", log_msg, msg_buf);
+			fprintf(stdout, "%sdatacenter_recv send %s\n", log_m, msg_buf);
 
 			memset(msg_buf, 0, msg_buf_max);
 			sprintf(msg_buf, "%d", clock_queue[0]);
@@ -685,15 +712,15 @@ void *datacenter_recv_thread(void *args)
 			if(status != msg_buf_max)
 			{
 				fprintf(stderr, "%sdatacenter_recv %d encoutnered an issue while sending response (status: %d/errno: %d)\n", 
-					err_msg, id, status, errno);
+					err_m, id, status, strerror(errno));
 				thread_rets->ret = 1;
 				break;
 			}
-			fprintf(stdout, "%sdatacenter_recv send %s\n", log_msg, msg_buf);
+			fprintf(stdout, "%sdatacenter_recv send %s\n", log_m, msg_buf);
 		}
 		else
 		{
-			fprintf(stdout, "%sdatacenter_recv %d received a connection on comm 1\n", log_msg, id);
+			fprintf(stdout, "%sdatacenter_recv %d received a connection on comm 1\n", log_m, id);
 
 			//wait to receive a message from the client
 			memset(msg_buf, 0, msg_buf_max);
@@ -701,7 +728,7 @@ void *datacenter_recv_thread(void *args)
 			if(status != msg_buf_max)
 			{
 				fprintf(stderr, "%sdatacenter_recv %d encountered an issue while reading the message (status: %d/errno: %d)\n", 
-					err_msg, id, status, errno);
+					err_m, id, status, strerror(errno));
 				thread_rets->ret = 1;
 				break;
 			}
@@ -711,8 +738,8 @@ void *datacenter_recv_thread(void *args)
 			*requested = strtol(msg_buf, &end, 10);
 			if(*end != 0 || errno != 0 || *requested < 0 || *requested > 100)
 			{
-				fprintf(stderr, "%sdatacenter_recv %d encountered an error while converting request message (errno: %d)", 
-					err_msg, id, errno);
+				fprintf(stderr, "%sdatacenter_recv %d encountered an error while converting request message (errno: %s)", 
+					err_m, id, strerror(errno));
 				thread_rets->ret = 1;
 				break;
 			}
@@ -727,7 +754,7 @@ void *datacenter_recv_thread(void *args)
 			id_queue[j] = 9;
 			*pool -= *requested;
 			*requested = 0;
-			fprintf(stdout, "%sthe pool has been updated to contain %d tickets\n", log_msg, *pool);
+			fprintf(stdout, "%sthe pool has been updated to contain %d tickets\n", log_m, *pool);
 			l_clock += 1;
 		}
 
@@ -736,7 +763,7 @@ void *datacenter_recv_thread(void *args)
 		if(status < 0)
 		{
 			fprintf(stderr, "%sdatacenter_recv %d failed to cleanly close the client_rspd socket (status: %d/errno: %d)\n", 
-				err_msg, id, status, errno);
+				err_m, id, status, strerror(errno));
 			thread_rets->ret = 1;
 			break;
 		}
@@ -744,7 +771,7 @@ void *datacenter_recv_thread(void *args)
 		if(status < 0)
 		{
 			fprintf(stderr, "%sdatacenter_recv %d failed to cleanly close the client_recv socket (status: %d/errno: %d)\n", 
-				err_msg, id, status, errno);
+				err_m, id, status, strerror(errno));
 			thread_rets->ret = 1;
 			break;
 		}
@@ -793,7 +820,7 @@ void *datacenter_send_thread(void *args)
 	while(1)
 	{
 		while(request_sig == 0);
-		fprintf(stdout, "%sdatacenter_send %d request_sig has been triggered\n", log_msg, id);
+		fprintf(stdout, "%sdatacenter_send %d request_sig has been triggered\n", log_m, id);
 
 		RETRANSMIT:
 		for(i = 0; i < count; i++)
@@ -803,7 +830,7 @@ void *datacenter_send_thread(void *args)
 			{
 				continue;
 			}
-			fprintf(stdout, "%sdatacenter_send %d sending request message to datacenter #%d\n", log_msg, id, i+1);
+			fprintf(stdout, "%sdatacenter_send %d sending request message to datacenter #%d\n", log_m, id, i+1);
 
 			comm_flag = 0;
 			datacenter_send_addr_len = sizeof(datacenter_send_addr);
@@ -816,7 +843,7 @@ void *datacenter_send_thread(void *args)
 			status = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 			if(status < 0)
 			{
-				fprintf(stderr, "%sdatacenter_send failed to open a socket (status: %d/errno: %d)\n", err_msg, status, errno);
+				fprintf(stderr, "%sdatacenter_send failed to open a socket (status: %d/errno: %d)\n", err_m, status, strerror(errno));
 				thread_rets->ret = 1;
 				break;
 			}
@@ -826,7 +853,7 @@ void *datacenter_send_thread(void *args)
 			status = connect(datacenter_send_sock_fd, (struct sockaddr*)&datacenter_send_addr, datacenter_send_addr_len);
 			if(status < 0)
 			{
-				fprintf(stdout, "%sdatacenter_send skipping datacenter %d since it's not online\n", log_msg, i+1);
+				fprintf(stdout, "%sdatacenter_send skipping datacenter %d since it's not online\n", log_m, i+1);
 				continue;
 			}
 
@@ -838,12 +865,12 @@ void *datacenter_send_thread(void *args)
 			if(status == -1 && errno == 104)
 			{
 				//close the socket connection to the datacenter and try again
-				fprintf(stdout, "%sdatacenter_send was interrupted while sending comma, retrying...\n", log_msg);
+				fprintf(stdout, "%sdatacenter_send was interrupted while sending comma, retrying...\n", log_m);
 				status = close(datacenter_send_sock_fd);
 				if(status < 0)
 				{
 					fprintf(stderr, "%sdatacenter_send failed to cleanly close the socket (status: %d/errno: %d)\n", 
-						err_msg, status, errno);
+						err_m, status, strerror(errno));
 					thread_rets->ret = 1;
 					break;
 				}
@@ -851,7 +878,7 @@ void *datacenter_send_thread(void *args)
 				status = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 				if(status < 0)
 				{
-					fprintf(stderr, "%sdatacenter_send failed to open a socket (status: %d/errno: %d)\n", err_msg, status, errno);
+					fprintf(stderr, "%sdatacenter_send failed to open a socket (status: %d/errno: %d)\n", err_m, status, strerror(errno));
 					thread_rets->ret = 1;
 					break;
 				}
@@ -860,7 +887,7 @@ void *datacenter_send_thread(void *args)
 				status = connect(datacenter_send_sock_fd, (struct sockaddr*)&datacenter_send_addr, datacenter_send_addr_len);
 				if(status < 0)
 				{
-					fprintf(stdout, "%sdatacenter_send skipping datacenter %d since it's not online\n", log_msg, i+1);
+					fprintf(stdout, "%sdatacenter_send skipping datacenter %d since it's not online\n", log_m, i+1);
 					continue;
 				}
 				goto RETRY_COMMA_SEND;
@@ -868,7 +895,7 @@ void *datacenter_send_thread(void *args)
 			else if(status != msg_buf_max)
 			{
 				fprintf(stderr, "%sdatacenter_send encoutnered an issue while sending request (status: %d/errno: %d)\n", 
-					err_msg, status, errno);
+					err_m, status, strerror(errno));
 				thread_rets->ret = 1;
 				break;
 			}
@@ -881,12 +908,12 @@ void *datacenter_send_thread(void *args)
 			if(status == -1 && errno == 104)
 			{
 				//close the socket connection to the datacenter and try again
-				fprintf(stdout, "%sdatacenter_send was interrupted while sending id, retrying...\n", log_msg);
+				fprintf(stdout, "%sdatacenter_send was interrupted while sending id, retrying...\n", log_m);
 				status = close(datacenter_send_sock_fd);
 				if(status < 0)
 				{
 					fprintf(stderr, "%sdatacenter_send failed to cleanly close the socket (status: %d/errno: %d)\n", 
-						err_msg, status, errno);
+						err_m, status, strerror(errno));
 					thread_rets->ret = 1;
 					break;
 				}
@@ -894,7 +921,7 @@ void *datacenter_send_thread(void *args)
 				status = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 				if(status < 0)
 				{
-					fprintf(stderr, "%sdatacenter_send failed to open a socket (status: %d/errno: %d)\n", err_msg, status, errno);
+					fprintf(stderr, "%sdatacenter_send failed to open a socket (status: %d/errno: %d)\n", err_m, status, strerror(errno));
 					thread_rets->ret = 1;
 					break;
 				}
@@ -903,7 +930,7 @@ void *datacenter_send_thread(void *args)
 				status = connect(datacenter_send_sock_fd, (struct sockaddr*)&datacenter_send_addr, datacenter_send_addr_len);
 				if(status < 0)
 				{
-					fprintf(stdout, "%sdatacenter_send skipping datacenter %d since it's not online\n", log_msg, i+1);
+					fprintf(stdout, "%sdatacenter_send skipping datacenter %d since it's not online\n", log_m, i+1);
 					continue;
 				}
 				goto RETRY_ID_SEND;
@@ -911,7 +938,7 @@ void *datacenter_send_thread(void *args)
 			else if(status != msg_buf_max)
 			{
 				fprintf(stderr, "%sdatacenter_send encoutnered an issue while sending request (status: %d/errno: %d)\n", 
-					err_msg, status, errno);
+					err_m, status, strerror(errno));
 				thread_rets->ret = 1;
 				break;
 			}
@@ -924,12 +951,12 @@ void *datacenter_send_thread(void *args)
 			if(status == -1 && errno == 104)
 			{
 				//close the socket connection to the datacenter and try again
-				fprintf(stdout, "%sdatacenter_send was interrupted while sending clock, retrying...\n", log_msg);
+				fprintf(stdout, "%sdatacenter_send was interrupted while sending clock, retrying...\n", log_m);
 				status = close(datacenter_send_sock_fd);
 				if(status < 0)
 				{
 					fprintf(stderr, "%sdatacenter_send failed to cleanly close the socket (status: %d/errno: %d)\n", 
-						err_msg, status, errno);
+						err_m, status, strerror(errno));
 					thread_rets->ret = 1;
 					break;
 				}
@@ -937,7 +964,7 @@ void *datacenter_send_thread(void *args)
 				status = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 				if(status < 0)
 				{
-					fprintf(stderr, "%sdatacenter_send failed to open a socket (status: %d/errno: %d)\n", err_msg, status, errno);
+					fprintf(stderr, "%sdatacenter_send failed to open a socket (status: %d/errno: %d)\n", err_m, status, strerror(errno));
 					thread_rets->ret = 1;
 					break;
 				}
@@ -946,7 +973,7 @@ void *datacenter_send_thread(void *args)
 				status = connect(datacenter_send_sock_fd, (struct sockaddr*)&datacenter_send_addr, datacenter_send_addr_len);
 				if(status < 0)
 				{
-					fprintf(stdout, "%sdatacenter_send skipping datacenter %d since it's not online\n", log_msg, i+1);
+					fprintf(stdout, "%sdatacenter_send skipping datacenter %d since it's not online\n", log_m, i+1);
 					continue;
 				}
 				goto RETRY_CLOCK_SEND;
@@ -954,7 +981,7 @@ void *datacenter_send_thread(void *args)
 			else if(status != msg_buf_max)
 			{
 				fprintf(stderr, "%sdatacenter_send encoutnered an issue while sending request (status: %d/errno: %d)\n", 
-					err_msg, status, errno);
+					err_m, status, strerror(errno));
 				thread_rets->ret = 1;
 				break;
 			}
@@ -965,12 +992,12 @@ void *datacenter_send_thread(void *args)
 			if(status == -1 && errno == 104)
 			{
 				//close the socket connection to the datacenter and try again
-				fprintf(stdout, "%sdatacenter_send was interrupted while receving id, retrying...\n", log_msg);
+				fprintf(stdout, "%sdatacenter_send was interrupted while receving id, retrying...\n", log_m);
 				status = close(datacenter_send_sock_fd);
 				if(status < 0)
 				{
 					fprintf(stderr, "%sdatacenter_send failed to cleanly close the socket (status: %d/errno: %d)\n", 
-						err_msg, status, errno);
+						err_m, status, strerror(errno));
 					thread_rets->ret = 1;
 					break;
 				}
@@ -978,7 +1005,7 @@ void *datacenter_send_thread(void *args)
 				status = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 				if(status < 0)
 				{
-					fprintf(stderr, "%sdatacenter_send failed to open a socket (status: %d/errno: %d)\n", err_msg, status, errno);
+					fprintf(stderr, "%sdatacenter_send failed to open a socket (status: %d/errno: %d)\n", err_m, status, strerror(errno));
 					thread_rets->ret = 1;
 					break;
 				}
@@ -987,7 +1014,7 @@ void *datacenter_send_thread(void *args)
 				status = connect(datacenter_send_sock_fd, (struct sockaddr*)&datacenter_send_addr, datacenter_send_addr_len);
 				if(status < 0)
 				{
-					fprintf(stdout, "%sdatacenter_send skipping datacenter %d since it's not online\n", log_msg, i+1);
+					fprintf(stdout, "%sdatacenter_send skipping datacenter %d since it's not online\n", log_m, i+1);
 					continue;
 				}
 				goto RETRY_ID_RECV;
@@ -995,7 +1022,7 @@ void *datacenter_send_thread(void *args)
 			else if(status != msg_buf_max)
 			{
 				fprintf(stderr, "%sdatacenter_send encountered an issue while reading the response (status: %d/errno: %d)\n", 
-					err_msg, status, errno);
+					err_m, status, strerror(errno));
 				thread_rets->ret = 1;
 				break;
 			}
@@ -1005,8 +1032,8 @@ void *datacenter_send_thread(void *args)
 			id_queue_res[i] = strtol(msg_buf, &end, 10);
 			if(*end != 0 || errno != 0)
 			{
-				fprintf(stderr, "%sdatacenter_send encountered an error while converting response id (errno: %d)", 
-					err_msg, errno);
+				fprintf(stderr, "%sdatacenter_send encountered an error while converting response id (errno: %s)", 
+					err_m, strerror(errno));
 				thread_rets->ret = 1;
 				break;
 			}
@@ -1017,12 +1044,12 @@ void *datacenter_send_thread(void *args)
 			if(status == -1 && errno == 104)
 			{
 				//close the socket connection to the datacenter and try again
-				fprintf(stdout, "%sdatacenter_send was interrupted while receiving clock, retrying...\n", log_msg);
+				fprintf(stdout, "%sdatacenter_send was interrupted while receiving clock, retrying...\n", log_m);
 				status = close(datacenter_send_sock_fd);
 				if(status < 0)
 				{
 					fprintf(stderr, "%sdatacenter_send failed to cleanly close the socket (status: %d/errno: %d)\n", 
-						err_msg, status, errno);
+						err_m, status, strerror(errno));
 					thread_rets->ret = 1;
 					break;
 				}
@@ -1030,7 +1057,7 @@ void *datacenter_send_thread(void *args)
 				status = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 				if(status < 0)
 				{
-					fprintf(stderr, "%sdatacenter_send failed to open a socket (status: %d/errno: %d)\n", err_msg, status, errno);
+					fprintf(stderr, "%sdatacenter_send failed to open a socket (status: %d/errno: %d)\n", err_m, status, strerror(errno));
 					thread_rets->ret = 1;
 					break;
 				}
@@ -1039,7 +1066,7 @@ void *datacenter_send_thread(void *args)
 				status = connect(datacenter_send_sock_fd, (struct sockaddr*)&datacenter_send_addr, datacenter_send_addr_len);
 				if(status < 0)
 				{
-					fprintf(stdout, "%sdatacenter_send skipping datacenter %d since it's not online\n", log_msg, i+1);
+					fprintf(stdout, "%sdatacenter_send skipping datacenter %d since it's not online\n", log_m, i+1);
 					continue;
 				}
 				goto RETRY_CLOCK_RECV;
@@ -1047,7 +1074,7 @@ void *datacenter_send_thread(void *args)
 			else if(status != msg_buf_max)
 			{
 				fprintf(stderr, "%sdatacenter_send encountered an issue while reading the response (status: %d/errno: %d)\n", 
-					err_msg, status, errno);
+					err_m, status, strerror(errno));
 				thread_rets->ret = 1;
 				break;
 			}
@@ -1057,8 +1084,8 @@ void *datacenter_send_thread(void *args)
 			clock_queue_res[i] = strtol(msg_buf, &end, 10);
 			if(*end != 0 || errno != 0)
 			{
-				fprintf(stderr, "%sdatacenter_send encountered an error while converting response clock (errno: %d)", 
-					err_msg, errno);
+				fprintf(stderr, "%sdatacenter_send encountered an error while converting response clock (errno: %s)", 
+					err_m, strerror(errno));
 				thread_rets->ret = 1;
 				break;
 			}
@@ -1068,7 +1095,7 @@ void *datacenter_send_thread(void *args)
 			if(status < 0)
 			{
 				fprintf(stderr, "%sdatacenter_send failed to cleanly close the socket (status: %d/errno: %d)\n", 
-					err_msg, status, errno);
+					err_m, status, strerror(errno));
 				thread_rets->ret = 1;
 				break;
 			}
@@ -1094,7 +1121,7 @@ void *datacenter_send_thread(void *args)
 
 		//check if our process claimed priority over the pool
 		fprintf(stdout, "%sdatacenter_send has clock: %d/id: %d, queue_response has clock: %d/id: %d\n", 
-			log_msg, l_clock, id, clock_queue_min, id_queue_min);
+			log_m, l_clock, id, clock_queue_min, id_queue_min);
 		if(id_queue_min == id)
 		{
 			claimed_sig = 1;
@@ -1102,7 +1129,7 @@ void *datacenter_send_thread(void *args)
 		else
 		{
 			//retransmit the request
-			fprintf(stdout, "%sdatacenter_send waiting for hold claim on queue, retransmitting...\n", log_msg);
+			fprintf(stdout, "%sdatacenter_send waiting for hold claim on queue, retransmitting...\n", log_m);
 			retransmit = 1;
 			memset(clock_queue_res, 0, sizeof(clock_queue_res));
 			memset(id_queue_res, 0, sizeof(id_queue_res));
@@ -1112,7 +1139,7 @@ void *datacenter_send_thread(void *args)
 		thread_rets->ret = 0;
 		while(claimed_sig == 0);
 		retransmit = 0;
-		fprintf(stdout, "%sdatacenter_send claimed_sig has been triggered\n", log_msg);
+		fprintf(stdout, "%sdatacenter_send claimed_sig has been triggered\n", log_m);
 
 		for(i = 0; i < count; i++)
 		{
@@ -1121,7 +1148,7 @@ void *datacenter_send_thread(void *args)
 			{
 				continue;
 			}
-			fprintf(stdout, "%sdatacenter_send sending release message to datacenter #%d\n", log_msg, i+1);
+			fprintf(stdout, "%sdatacenter_send sending release message to datacenter #%d\n", log_m, i+1);
 
 			comm_flag = 1;
 			datacenter_send_addr_len = sizeof(datacenter_send_addr);
@@ -1134,7 +1161,7 @@ void *datacenter_send_thread(void *args)
 			status = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 			if(status < 0)
 			{
-				fprintf(stderr, "%sdatacenter_send failed to open a socket (status: %d/errno: %d)\n", err_msg, status, errno);
+				fprintf(stderr, "%sdatacenter_send failed to open a socket (status: %d/errno: %d)\n", err_m, status, strerror(errno));
 				thread_rets->ret = 1;
 				break;
 			}
@@ -1144,7 +1171,7 @@ void *datacenter_send_thread(void *args)
 			status = connect(datacenter_send_sock_fd, (struct sockaddr*)&datacenter_send_addr, datacenter_send_addr_len);
 			if(status < 0)
 			{
-				fprintf(stdout, "%sdatacenter_send skipping datacenter %d since it's not online\n", log_msg, i+1);
+				fprintf(stdout, "%sdatacenter_send skipping datacenter %d since it's not online\n", log_m, i+1);
 				continue;
 			}
 
@@ -1156,12 +1183,12 @@ void *datacenter_send_thread(void *args)
 			if(status == -1 && errno == 104)
 			{
 				//close the socket connection to the datacenter and try again
-				fprintf(stdout, "%sdatacenter_send was interrupted while sending commb, retrying...\n", log_msg);
+				fprintf(stdout, "%sdatacenter_send was interrupted while sending commb, retrying...\n", log_m);
 				status = close(datacenter_send_sock_fd);
 				if(status < 0)
 				{
 					fprintf(stderr, "%sdatacenter_send failed to cleanly close the socket (status: %d/errno: %d)\n", 
-						err_msg, status, errno);
+						err_m, status, strerror(errno));
 					thread_rets->ret = 1;
 					break;
 				}
@@ -1169,7 +1196,7 @@ void *datacenter_send_thread(void *args)
 				status = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 				if(status < 0)
 				{
-					fprintf(stderr, "%sdatacenter_send failed to open a socket (status: %d/errno: %d)\n", err_msg, status, errno);
+					fprintf(stderr, "%sdatacenter_send failed to open a socket (status: %d/errno: %d)\n", err_m, status, strerror(errno));
 					thread_rets->ret = 1;
 					break;
 				}
@@ -1178,7 +1205,7 @@ void *datacenter_send_thread(void *args)
 				status = connect(datacenter_send_sock_fd, (struct sockaddr*)&datacenter_send_addr, datacenter_send_addr_len);
 				if(status < 0)
 				{
-					fprintf(stdout, "%sdatacenter_send skipping datacenter %d since it's not online\n", log_msg, i+1);
+					fprintf(stdout, "%sdatacenter_send skipping datacenter %d since it's not online\n", log_m, i+1);
 					continue;
 				}
 				goto RETRY_COMMB_SEND;
@@ -1186,7 +1213,7 @@ void *datacenter_send_thread(void *args)
 			else if(status != msg_buf_max)
 			{
 				fprintf(stderr, "%sdatacenter_send encoutnered an issue while sending request (status: %d/errno: %d)\n", 
-					err_msg, status, errno);
+					err_m, status, strerror(errno));
 				thread_rets->ret = 1;
 				break;
 			}
@@ -1200,12 +1227,12 @@ void *datacenter_send_thread(void *args)
 			{
 				//close the socket connection to the datacenter and try again
 				fprintf(stdout, "%sdatacenter_send was interrupted while sending requested amount for release, retrying...\n", 
-					log_msg);
+					log_m);
 				status = close(datacenter_send_sock_fd);
 				if(status < 0)
 				{
 					fprintf(stderr, "%sdatacenter_send failed to cleanly close the socket (status: %d/errno: %d)\n", 
-						err_msg, status, errno);
+						err_m, status, strerror(errno));
 					thread_rets->ret = 1;
 					break;
 				}
@@ -1213,7 +1240,7 @@ void *datacenter_send_thread(void *args)
 				status = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 				if(status < 0)
 				{
-					fprintf(stderr, "%sdatacenter_send failed to open a socket (status: %d/errno: %d)\n", err_msg, status, errno);
+					fprintf(stderr, "%sdatacenter_send failed to open a socket (status: %d/errno: %d)\n", err_m, status, strerror(errno));
 					thread_rets->ret = 1;
 					break;
 				}
@@ -1222,7 +1249,7 @@ void *datacenter_send_thread(void *args)
 				status = connect(datacenter_send_sock_fd, (struct sockaddr*)&datacenter_send_addr, datacenter_send_addr_len);
 				if(status < 0)
 				{
-					fprintf(stdout, "%sdatacenter_send skipping datacenter %d since it's not online\n", log_msg, i+1);
+					fprintf(stdout, "%sdatacenter_send skipping datacenter %d since it's not online\n", log_m, i+1);
 					continue;
 				}
 				goto RETRY_TICKETR_SEND;
@@ -1230,7 +1257,7 @@ void *datacenter_send_thread(void *args)
 			else if(status != msg_buf_max)
 			{
 				fprintf(stderr, "%sdatacenter_send encoutnered an issue while sending request (status: %d/errno: %d)\n", 
-					err_msg, status, errno);
+					err_m, status, strerror(errno));
 				thread_rets->ret = 1;
 				break;
 			}
@@ -1240,7 +1267,7 @@ void *datacenter_send_thread(void *args)
 			if(status < 0)
 			{
 				fprintf(stderr, "%sdatacenter_send failed to cleanly close the socket (status: %d/errno: %d)\n", 
-					err_msg, status, errno);
+					err_m, status, strerror(errno));
 				thread_rets->ret = 1;
 				break;
 			}

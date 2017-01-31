@@ -28,10 +28,19 @@ typedef struct packet
 	uint32_t p_clk;
 	uint32_t t_amt;
 }packet __attribute__((packed));
+/*
+	instr
+	0 == starting up (notify of online status)
+	1 == shutting down (notify of offline status)
+	2 == sending request for ticket pool access
+	3 == sending reply
+	4 == sending release for ticket pool access
+*/
 
 typedef struct dc_obj
 {
 	uint32_t id;
+	uint32_t clk;
 	uint8_t online;
 	char *hostname;
 }dc_obj;
@@ -46,7 +55,7 @@ typedef struct arg_struct
 	int port;
 	int count;
 	char *hostname;
-	datacenter_obj *datacenters;
+	dc_obj *datacenters;
 }arg_obj;
 
 typedef struct ret_struct
@@ -61,7 +70,8 @@ struct flock *lock_cfg(FILE *fd);
 int8_t unlock_cfg(struct flock *fl);
 
 /*variables*/
-char *err_msg;
-char *log_msg;
+char *err_m;
+char *log_m;
+char *cls_m;
 
 #endif
