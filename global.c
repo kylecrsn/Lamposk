@@ -2,10 +2,16 @@
 
 void global_init()
 {
+	signal(SIGINT, terminate_handler);
 	opterr = 0;
 	err_m = "[ERR|CLK:";
 	log_m = "[LOG|CLK:";
 	cls_m = "]:"
+}
+
+void terminate_handler(int32_t x)
+{
+	fprintf("[DATACENTER SHUTTING DOWN]\n");
 }
 
 void delay(uint32_t seconds)
@@ -14,9 +20,8 @@ void delay(uint32_t seconds)
 	while (time(0) < delay_time);
 }
 
-struct flock *lock_cfg(FILE *fd)
+struct flock *lock_cfg(int32_t fd)
 {
-	int32_t fd;
 	struct flock *fl = (struct flock *fl)malloc(sizeof(struct flock));
 	*fl.l_type = F_WRLCK;
 	*fl.l_whence = SEEK_SET;
@@ -27,21 +32,23 @@ struct flock *lock_cfg(FILE *fd)
 	//lock the config file for writing
 	if(fcntl(fd, F_SETLKW, fl) < 0)
 	{
-		fprintf(stderr, "%ssomething went wrong while attempting to lock the .cfg file (errno: %d)\n", err_msg, errno);
+		fprintf(stderr, "%s%d%s (lock_cfg) something went wrong while attempting to lock the .cfg file (errno: %s)\n", 
+			err_m, 0, cls_m, strerror(errno));
 		return NULL;
 	}
 
 	return fl;
 }
 
-int8_t unlock_cfg(FILE *fd, struct flock *fl)
+int8_t unlock_cfg(int32_t fd, struct flock *fl)
 {
 	*fl.l_type = F_UNLCK;
 
 	//unlock the config file
 	if(fcntl(fd, F_SETLK, fl) < 0)
 	{
-		fprintf(stderr, "%ssomething went wrong while attempting to unlock the .cfg file (errno: %d)\n", err_msg, errno);
+		fprintf(stderr, "%s%d%s (unlock_cfg) something went wrong while attempting to unlock the .cfg file (errno: %s)\n", 
+			err_m, 0, cls_m, strerror(errno));
 		return -1;
 	}
 
@@ -49,9 +56,9 @@ int8_t unlock_cfg(FILE *fd, struct flock *fl)
 	return 0;
 }
 
-void print_tickets(int32_t x)
+void print_tickets(uint32_t amnt)
 {
-	if(x == 1)
+	if(amnt == 1)
 	{
 		fprintf(stdout, "ticket");
 	}

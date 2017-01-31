@@ -38,26 +38,31 @@ int datacenter_handler()
 	const char *hn;
 	int32_t i_dc = -1;
 	int32_t i;
+	int32_t status;
 	int32_t dc_addr_count;
+	int32_t dc_addr_id;
 	int32_t ticket_pool;
 	int32_t ticket_pool_init;
+	int32_t msg_delay;
+	int32_t cl_lstn_port;
+	int32_t dc_lstn_port_base;
 	config_t cf_local;
 	config_t *cf;
 	struct flock *fl;
-	FILE *fd;
+	int32_t fd;
+	time_t boot_time;
 	config_setting_t *dc_addr_settings;
 	config_setting_t *dc_addr_elem_setting;
-	config_setting_t *dc_addr_online_setting;
-	datacenter_obj *dc_sys;
+	dc_obj *dc_sys;
 	pthread_t cl_lstn_thread_id;
-	pthread_t dc_bcst_thread_id;
-	pthread_t dc_lstn_thread_id;
-	pthread_t stdin_thread_id;
+	// pthread_t dc_bcst_thread_id;
+	// pthread_t dc_lstn_thread_id;
+
 
 	arg_obj *cl_lstn_args;
-	arg_obj *dc_bcst_args;
-	arg_obj *dc_lstn_args;
-	arg_obj *stdin_args;
+	// arg_obj *dc_bcst_args;
+	// arg_obj *dc_lstn_args;
+
 
 	/*
 		REVISED CODE
@@ -88,36 +93,40 @@ int datacenter_handler()
 	config_lookup_int(cf, "delay", &msg_delay);
 	config_lookup_int(cf, "dc.ticket_pool_init", &ticket_pool_init);
 	config_lookup_int(cf, "dc.ticket_pool", &ticket_pool);
-	config_lookup_int(cf, "dc.cl_recv_port", &c_recv_port);
-	config_lookup_int(cf, "dc.dc_recv_port_base", &dc_recv_port);
+	config_lookup_int(cf, "dc.cl_lstn_port", &cl_lstn_port);
+	config_lookup_int(cf, "dc.dc_lstn_port_base", &dc_lstn_port_base);
 	dc_addr_settings = config_lookup(cf, "dc.addrs");
 	dc_addr_count = config_setting_length(dc_addr_settings);
-	ticket_pool_max = ticket_pool;
 
 	//populate an array with all of the datacenter configs
 	dc_sys = (dc_obj *)malloc(dc_addr_count * sizeof(dc_obj));
 	for(i = 0; i < dc_addr_count; i++)
 	{
 		dc_addr_elem_setting = config_setting_get_elem(dc_addr_settings, i);
-		config_setting_lookup_int(dc_addr_elem_setting, "id", &(dc_sys[i]->id));
-		config_setting_lookup_int(dc_addr_elem_setting, "online", &(dc_sys[i]->online));
+		config_setting_lookup_int(dc_addr_elem_setting, "id", &(dc_sys[i].id));
+		config_setting_lookup_int(dc_addr_elem_setting, "online", &(dc_sys[i].online));
 		config_setting_lookup_string(dc_addr_elem_setting, "hostname", &hn);
 		dc_sys[i].clk = 0;
 		dc_sys[i].hostname = (char *)malloc(strlen(hn) + 1);
-		mempcy(dc_sys[i].hostname, hn, strlen(hn) + 1);
+		memcpy(dc_sys[i].hostname, hn, strlen(hn) + 1);
 
 		//set the index for the first availble datacenter not currently online
-		if(dc_sys[i]->online == 0 && i_dc == -1)
+		if(dc_sys[i].online == 0 && i_dc == -1)
 		{
 			i_dc = i;
+
+			//set the online status to 1
+			config_setting_set_int(config_setting_get_member(dc_addr_elem_setting, "online"), 1);
+			dc_sys[i].online = 1;
+			config_write_file(cf, "global.cfg");
 		}
 	}
 
 	//all datacenters are already online
-	if(dc_sys[i-1]->online == 1)
+	if(dc_sys[i-1].online == 1)
 	{
 		fprintf(stderr, "%s%d%s (%s) can't start another datacenter, all datacenters specified by global.cfg are currently online\n", 
-			err_m, dc_sys[i_dc], cls_m, fnc_m,);
+			err_m, 0, cls_m, fnc_m);
 		config_destroy(cf);
 		unlock_cfg(fd, fl);
 		close(fd);
@@ -130,29 +139,30 @@ int datacenter_handler()
 	close(fd);
 
 	//log datacenter metadata
-	fprintf(stdout, "========================\n|   Datacenter #%d Log   |\n========================\n\n");
-	fprintf(stdout, "- Boot Time: %s\n", asctime(localtime(time())));
+	time(&boot_time);
+	fprintf(stdout, "========================\n|   Datacenter #%d Log   |\n========================\n\n", dc_sys[i_dc].id);
+	fprintf(stdout, "- Boot Time: %s\n", asctime(localtime(&boot_time)));
 	fprintf(stdout, "- ID: %d\n", dc_sys[i_dc].id);
-	fprintf(stdout, "- Initial Clock: %d\n", dc_sys[i_dc]);
+	fprintf(stdout, "- Initial Clock: %d\n", dc_sys[i_dc].clk);
 	fprintf(stdout, "- Initial Ticket Pool: %d\n", ticket_pool_init);
 	fprintf(stdout, "- Current Ticket Pool: %d\n", ticket_pool);
-	fprintf(stdout, "- Client Listen Port: %d\n", cl_intf_port);
-	fprintf(stdout, "- Datacenter Broadcast Base Port: %d\n",dc_ipc_port);
+	fprintf(stdout, "- Client Listen Port: %d\n", cl_lstn_port);
+	fprintf(stdout, "- Datacenter Broadcast Base Port: %d\n",dc_lstn_port_base);
 	fprintf(stdout, "- Datacenter Hostname: %s\n\n\n", dc_sys[i_dc].hostname);
 
 	//spawn cl_lstn_thread
 	cl_lstn_args = (arg_obj *)malloc(sizeof(arg_obj));
-	cl_lstn_args->port = client_recv_port;
-	cl_lstn_args->hostname = datacenter.hostname;
+	cl_lstn_args->port = cl_lstn_port;
+	cl_lstn_args->hostname = dc_sys[i_dc].hostname;
 	fflush(stdout);
 	status = pthread_create(&cl_lstn_thread_id, NULL, cl_lstn_thread, (void *)cl_lstn_args);
 	if(status != 0)
 	{
 		fprintf(stderr, "%s%d%s (%s) failed to spawn cl_lstn_thread (errno: %s)\n", 
-			err_m, dc_sys[i_dc], cls_m, fnc_m, strerror(errno));
+			err_m, dc_sys[i_dc].clk, cls_m, fnc_m, strerror(errno));
 		return 1;
 	}
-
+/*
 	//spawn datacenter_recv thread
 	datacenter_recv_args = (arg_obj *)malloc(sizeof(struct arg_struct));
 	datacenter_recv_args->id = datacenter.id;
@@ -188,81 +198,63 @@ int datacenter_handler()
 		fprintf(stderr, "%sdatacenter %d failed to spawn datacenter_send thread (status: %d/errno: %d)\n", 
 			err_m, datacenter.id, status, strerror(errno));
 		return 1;
-	}
+	}*/
 
-	//spawn stdin thread
-	stdin_args = (arg_obj *)malloc(sizeof(struct arg_struct));
-	fflush(stdout);
-	status = pthread_create(&stdin_thread_id, NULL, stdin_thread, (void *)stdin_args);
-	if(status != 0)
+
+	fprintf(stdout, "%s%d%s (%s) finished spawning primary child threads\n", 
+			log_m, dc_sys[i_dc].clk, cls_m, fnc_m);
+
+	//JOIN THREADS
+
+	fprintf(stdout, "%s%d%s (%s) finished joining primary child threads\n", 
+			log_m, dc_sys[i_dc].clk, cls_m, fnc_m);
+
+	//free the dynamic dc_obj memory
+	for(i = 0; i < dc_addr_count; i++)
 	{
-		fprintf(stderr, "%sdatacenter %d failed to spawn stdin thread (status: %d/errno: %d)\n", 
-			err_m, datacenter.id, status, strerror(errno));
+		free(dc_sys[i].hostname);
+	}
+	free(dc_sys);
+
+	//open and lock the config file
+	fd = open("global.cfg", O_RDWR);
+	fl = lock_cfg(fd);
+	if(fl == NULL)
+	{
 		return 1;
 	}
 
-	fprintf(stdout, "%sfinished spawning threads\n", log_m);
-
-	//terminate datacenter
-	while(1)
+	//initialize the config object
+	cf = &cf_local;
+	config_init(cf);
+	if(!config_read_file(cf, "global.cfg"))
 	{
-		if(terminate_sig == 1)
-		{
-			fflush(stdout);
-			pthread_cancel(client_recv_thread_id);
-			pthread_cancel(datacenter_recv_thread_id);
-			pthread_cancel(datacenter_send_thread_id);
-			pthread_cancel(stdin_thread_id);
-		}
+		fprintf(stderr, "%s%d%s (%s) encountered an issue while reading from config file: %s:%d - %s\n", 
+			err_m, 0, cls_m, fnc_m, config_error_file(cf), config_error_line(cf), config_error_text(cf));
+		config_destroy(cf);
+		unlock_cfg(fd, fl);
+		close(fd);
+		return 1;
 	}
 
-	fprintf(stdout, "%sfinished canceling threads\n", log_m);
-
-	//free the hostname memory
-	free(datacenter.hostname);
-	for(i = 0; i < datacenter_count; i++)
+	//set the online status back to 0
+	dc_addr_settings = config_lookup(cf, "dc.addrs");
+	for(i = 0; i < dc_addr_count; i++)
 	{
-		free(datacenters[i].hostname);
-	}
-
-	//re-init the config variable, lock the file, clear datacenter running flag, unlock the file
-	while(1)
-	{
-		config_init(cf);
-		if(!config_read_file(cf, "global.cfg"))
+		dc_addr_elem_setting = config_setting_get_elem(dc_addr_settings, i);
+		config_setting_lookup_int(dc_addr_elem_setting, "id", &dc_addr_id);
+		if(dc_addr_id == i_dc+1)
 		{
-			fprintf(stderr, "%s%s:%d - %s\n", err_m, config_error_file(cf), config_error_line(cf), config_error_text(cf));
-			config_destroy(cf);
-			return 1;
-		}
-
-		lock_setting = config_lookup(cf, "lock");
-		if(config_setting_get_int(lock_setting) == 1)
-		{
-			config_destroy(cf);
-		}
-		else
-		{
-			config_setting_set_int(lock_setting, 1);
-			config_write_file(cf, "global.cfg");
-			datacenter_addr_settings = config_lookup(cf, "datacenter.addresses");
-			for(i = 0; i < datacenter_count; i++)
-			{
-				datacenter_addr_elem_setting = config_setting_get_elem(datacenter_addr_settings, i);
-				config_setting_lookup_int(datacenter_addr_elem_setting, "id", &datcenter_addr_id);
-				if(datcenter_addr_id == datacenter.id)
-				{
-					break;
-				}
-			}
-			datacenter_addr_running_setting = config_setting_get_member(datacenter_addr_elem_setting, "running");
-			config_setting_set_int(datacenter_addr_running_setting, 0);
-			config_setting_set_int(lock_setting, 0);
-			config_write_file(cf, "global.cfg");
-			config_destroy(cf);
 			break;
 		}
 	}
+	config_setting_set_int(config_setting_get_member(dc_addr_elem_setting, "online"), 0);
+	config_write_file(cf, "global.cfg");
+
+	//Close and unlock the config file
+	config_destroy(cf);
+	unlock_cfg(fd, fl);
+	close(fd);
 
 	return 0;
 }
@@ -394,7 +386,7 @@ void *cl_lstn_thread(void *args)
 			break;
 		}
 
-//WAIT FOR THREADS TO NEGOTIATE ACCESS TO TICKET POOL
+		//WAIT FOR THREADS TO NEGOTIATE ACCESS TO TICKET POOL
 
 		fprintf(stdout, "%s%d%s (%s) ticket pool control has been obtained, processing request\n", 
 			log_m, dc->clk, cls_m, fnc_m);
@@ -427,7 +419,7 @@ void *cl_lstn_thread(void *args)
 		fprintf(stdout, "%s%d%s (%s) request completed, allowing release of ticket pool control\n", 
 			log_m, dc->clk, cls_m, fnc_m);
 
-//ALLOW THREADS TO RELEASE ACCESS OF TICKET POOL
+		//ALLOW THREADS TO RELEASE ACCESS OF TICKET POOL
 
 		//send the client the request results
 		status = send(cl_rspd_sock_fd, msg_buf, msg_buf_max, 0);
@@ -473,7 +465,7 @@ void *cl_lstn_thread(void *args)
 	pthread_exit((void *)thread_rets);
 }
 
-//receive messages from other datacenters for synchronization
+/*//receive messages from other datacenters for synchronization
 void *datacenter_recv_thread(void *args)
 {
 	int msg_buf_max = 4096;
@@ -1286,50 +1278,4 @@ void *datacenter_send_thread(void *args)
 
 	fflush(stdout);
 	return((void *)thread_rets);
-}
-
-//Read from stdin to catch ctrl^c/ctrl^d
-void *stdin_thread(void *args)
-{
-	int stdin_buf_max = 4096;
-	char *exit = "q\n";
-	char stdin_buf[stdin_buf_max];
-	arg_obj *thread_args = (arg_obj *)args;
-	ret_obj *thread_rets = (ret_obj *)malloc(sizeof(ret_obj));
-
-	fflush(stdout);
-	free(thread_args);
-
-	while(1)
-	{
-		if(terminate_sig == 1)
-		{
-			thread_rets->ret = 0;
-			break;
-		}
-
-		//flush stdout and reset the stdin_buf memory
-		fflush(stdout);
-		memset(stdin_buf, 0, stdin_buf_max);
-
-		//if crtl^c or crtl^d was received from stdin
-		if(!fgets(stdin_buf, stdin_buf_max, stdin))
-		{
-			thread_rets->ret = 0;
-			terminate_sig = 1;
-			break;
-		}
-		if(strcmp(stdin_buf, exit) == 0)
-		{
-			thread_rets->ret = 0;
-			terminate_sig = 1;
-			break;
-		}
-	}
-
-	fflush(stdout);
-	return ((void *)thread_rets);
-}
-
-
-
+}*/

@@ -11,6 +11,7 @@
 #include <stdbool.h>
 #include <inttypes.h>
 #include <getopt.h>
+#include <signal.h>
 #include <errno.h>
 #include <pthread.h>
 #include <netdb.h>
@@ -27,47 +28,31 @@ typedef struct packet
 	uint32_t p_id;
 	uint32_t p_clk;
 	uint32_t t_amt;
-}packet __attribute__((packed));
-/*
-	instr
-	0 == starting up (notify of online status)
-	1 == shutting down (notify of offline status)
-	2 == sending request for ticket pool access
-	3 == sending reply
-	4 == sending release for ticket pool access
-*/
-
+}__attribute__((packed)) packet;
 typedef struct dc_obj
 {
-	uint32_t id;
-	uint32_t clk;
-	uint8_t online;
+	int32_t id;
+	int32_t clk;
+	int32_t online;
 	char *hostname;
 }dc_obj;
-
 typedef struct arg_struct
 {
-	int id;
-	int *clock;
-	int *pool;
-	int *requested;
-	int delay;
-	int port;
-	int count;
+	int32_t port;
 	char *hostname;
-	dc_obj *datacenters;
 }arg_obj;
-
 typedef struct ret_struct
 {
-	int ret;
+	int32_t ret;
 }ret_obj;
 
 /*functions*/
-void global_init()
+void global_init();
+void terminate_handler(int32_t x);
 void delay(uint32_t seconds);
-struct flock *lock_cfg(FILE *fd);
-int8_t unlock_cfg(struct flock *fl);
+struct flock *lock_cfg(int32_t fd);
+int8_t unlock_cfg(int32_t fd, struct flock *fl);
+void print_tickets(uint32_t amnt);
 
 /*variables*/
 char *err_m;

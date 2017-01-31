@@ -41,3 +41,12 @@ NOTE: To shutdown the datacenters, use ctrl^c, then reset the "running flag" in 
 ##### Notes
 - Each datacenter stores its own view of the unit count
 - maintian a logical lamport clock <clk, proc_id> for breaking ties
+
+/*
+	instr
+	0 == starting up (notify of online status)
+	1 == shutting down (notify of offline status)
+	2 == sending request for ticket pool access
+	3 == sending reply
+	4 == sending release for ticket pool access
+*/

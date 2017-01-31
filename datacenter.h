@@ -6,18 +6,8 @@
 
 /*functions*/
 int datacenter_handler();
-void *client_recv_thread(void *args);
-void *datacenter_recv_thread(void *args);
-void *datacenter_send_thread(void *args);
-void *stdin_thread(void *args);
-
-/*variables*/
-int request_sig;
-int claimed_sig;
-int release_sig;
-int terminate_sig;
-int l_clock;
-int clock_queue[6];
-int id_queue[6];
+void *cl_lstn_thread(void *args);
+void *dc_lstn_thread(void *args);
+void *dc_bcst_thread(void *args);
 
 #endif
