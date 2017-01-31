@@ -125,8 +125,8 @@ int datacenter_handler()
 	//all datacenters are already online
 	if(dc_sys[i-1].online == 1)
 	{
-		fprintf(stderr, "%s%d%s (%s) can't start another datacenter, all datacenters specified by global.cfg are currently online\n", 
-			err_m, 0, cls_m, fnc_m);
+		fprintf(stdout, "%s%d%s (%s) can't start another datacenter, all datacenters specified by global.cfg are currently online\n", 
+			log_m, 0, cls_m, fnc_m);
 		config_destroy(cf);
 		unlock_cfg(fd, fl);
 		close(fd);
@@ -152,6 +152,7 @@ int datacenter_handler()
 
 	//spawn cl_lstn_thread
 	cl_lstn_args = (arg_obj *)malloc(sizeof(arg_obj));
+	cl_lstn_args->id = dc_sys[i_dc].id;
 	cl_lstn_args->port = cl_lstn_port;
 	cl_lstn_args->hostname = dc_sys[i_dc].hostname;
 	fflush(stdout);
@@ -465,7 +466,7 @@ void *cl_lstn_thread(void *args)
 	pthread_exit((void *)thread_rets);
 }
 
-/*//receive messages from other datacenters for synchronization
+//receive messages from other datacenters for synchronization
 void *datacenter_recv_thread(void *args)
 {
 	int msg_buf_max = 4096;
@@ -775,7 +776,7 @@ void *datacenter_recv_thread(void *args)
 	return((void *)thread_rets);
 }
 
-//send messages to all other datacenters for synchronization
+/*//send messages to all other datacenters for synchronization
 void *datacenter_send_thread(void *args)
 {
 	int msg_buf_max = 4096;

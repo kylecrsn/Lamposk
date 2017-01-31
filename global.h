@@ -13,12 +13,12 @@
 #include <getopt.h>
 #include <signal.h>
 #include <errno.h>
-#include <pthread.h>
 #include <netdb.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <pthread.h>
 #include <libconfig.h>
 
 /*structs*/
@@ -38,6 +38,7 @@ typedef struct dc_obj
 }dc_obj;
 typedef struct arg_struct
 {
+	int32_t id;
 	int32_t port;
 	char *hostname;
 }arg_obj;

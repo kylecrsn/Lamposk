@@ -1,78 +1,108 @@
 #include "client.h"
 
-int client_handler()
+int32_t client_handler()
 {
-	int status = 0;
-	int msg_buf_max = 4096;
-	int datacenter_addr_running = 0;
-	int i;
-	int request_response;
-	int client_sock_fd;
-	int client_recv_port;
-	int datacenter_count;
-	int datacenter_id;
-	int ticket_count;
+	int32_t status = 0;
+	int32_t msg_buf_max = 4096;
+	int32_t dc_addr_online = 0;
+	int32_t i;
+	int32_t rspn;
+	int32_t cl_sock_fd;
+	int32_t cl_recv_port;
+	int32_t dc_addr_count;
+	int32_t i_dc;
+	int32_t ticket_count;
+	int32_t retry_count = 0;
 	char stdin_buf[256];
 	char msg_buf[msg_buf_max];
 	char *end;
-	char *datacenter_status;
+	char *dc_status;
 	const char *hostname;
 	struct sockaddr_in datacenter_addr;
 	socklen_t datacenter_addr_len;
-	config_setting_t *datacenter_addr_settings;
-	config_setting_t *datacenter_addr_elem_setting;
-	datacenter_obj *datacenters;
+	config_setting_t *dc_addr_settings;
+	config_setting_t *dc_addr_elem_setting;
+	datacenter_obj *dc_sys;
 
-	fprintf(stdout, "========================\n|   Welcome to Ciosk   |\n========================\n\n");
+	char *fnc_m = "client_handler";
+	int32_t fd;
 
-	//read in datacenter values from locked config file, unlock file, destroy config variable
-	config_lookup_int(cf, "datacenter.client_recv_port", &client_recv_port);
-	datacenter_addr_settings = config_lookup(cf, "datacenter.addresses");
-	datacenter_count = config_setting_length(datacenter_addr_settings);
-	datacenters = (datacenter_obj *)malloc(datacenter_count * sizeof(datacenter_obj));
-	for(i = 0; i < datacenter_count; i++)
+
+	//open and lock the config file
+	fd = open("global.cfg", O_RDWR);
+	fl = lock_cfg(fd);
+	if(fl == NULL)
 	{
-		datacenter_addr_elem_setting = config_setting_get_elem(datacenter_addr_settings, i);
-		config_setting_lookup_int(datacenter_addr_elem_setting, "id", &datacenters[i].id);
-		config_setting_lookup_int(datacenter_addr_elem_setting, "running", &datacenters[i].running);
-		config_setting_lookup_string(datacenter_addr_elem_setting, "hostname", &hostname);
-		datacenters[i].hostname = (char *)malloc(strlen(hostname) + 1);
-		memcpy(datacenters[i].hostname, hostname, strlen(hostname) + 1);
-		if(datacenters[i].running == 1)
-		{
-			datacenter_addr_running++;
-		}
-	}
-	config_setting_set_int(lock_setting, 0);
-	config_write_file(cf, "global.cfg");
-	config_destroy(cf);
-
-	//handle if there are no datacenters open
-	if(datacenter_addr_running == 0)
-	{
-		fprintf(stdout, "There are currently no kiosks online, please try again later.\n");
-		for(i = 0; i < datacenter_count; i++)
-		{
-			free(datacenters[i].hostname);
-		}
 		return 1;
 	}
 
-	//ask user to select which data center to connect to
-	fprintf(stdout, "There are currently %d kiosks online. Which one would like to connect to?\n", datacenter_addr_running);
-	fprintf(stdout, "KIOSK | STATUS\n==============\n");
-	for(i = 0; i < datacenter_count; i++)
+	//initialize the config object
+	cf = &cf_local;
+	config_init(cf);
+	if(!config_read_file(cf, "global.cfg"))
 	{
-		if(datacenters[i].running == 1)
+		fprintf(stderr, "%sX%s (%s) encountered an issue while reading from config file: %s:%d - %s\n", 
+			err_m, cls_m, fnc_m, config_error_file(cf), config_error_line(cf), config_error_text(cf));
+		config_destroy(cf);
+		unlock_cfg(fd, fl);
+		close(fd);
+		return 1;
+	}
+
+	//get general config values
+	config_lookup_int(cf, "dc.cl_lstn_port", &cl_lstn_port);
+	dc_addr_settings = config_lookup(cf, "dc.addrs");
+	dc_addr_count = config_setting_length(dc_addr_settings);
+
+	//populate an array with all of the datacenter configs
+	dc_sys = (dc_obj *)malloc(dc_addr_count * sizeof(dc_obj));
+	for(i = 0; i < dc_addr_count; i++)
+	{
+		dc_addr_elem_setting = config_setting_get_elem(dc_addr_settings, i);
+		config_setting_lookup_int(dc_addr_elem_setting, "id", &(dc_sys[i].id));
+		config_setting_lookup_int(dc_addr_elem_setting, "online", &(dc_sys[i].online));
+		config_setting_lookup_string(dc_addr_elem_setting, "hostname", &hn);
+		dc_sys[i].clk = 0;
+		dc_sys[i].hostname = (char *)malloc(strlen(hn) + 1);
+		memcpy(dc_sys[i].hostname, hn, strlen(hn) + 1);
+
+		//set the index for the first availble datacenter not currently online
+		if(dc_sys[i].online == 1)
 		{
-			datacenter_status = "ONLINE";
+			dc_addr_online++;
+		}
+	}
+
+	//close and unlock the config file
+	config_destroy(cf);
+	unlock_cfg(fd, fl);
+	close(fd);
+
+	fprintf(stdout, "========================\n|   Welcome to Ciosk   |\n========================\n\n");
+
+	//handle if there are no datacenters open
+	if(dc_addr_online == 0)
+	{
+		fprintf(stdout, "There are currently no kiosks online, please try again later.\n");
+		return free_dc_sys(dc_sys, dc_addr_count);
+	}
+
+	//ask user to select which data center to connect to
+	fprintf(stdout, "There are currently %d kiosks online. Which one would like to connect to?\n", 
+		dc_addr_online);
+	fprintf(stdout, "KIOSK | STATUS\n==============\n");
+	for(i = 0; i < dc_addr_count; i++)
+	{
+		if(dc_sys[i].online == 1)
+		{
+			dc_status = "ONLINE";
 		}
 		else
 		{
-			datacenter_status = "OFFLINE";
+			dc_status = "OFFLINE";
 		}
 
-		fprintf(stdout, "#%d    | %s\n", datacenters[i].id, datacenter_status);
+		fprintf(stdout, "#%d    | %s\n", dc_sys[i].id, dc_status);
 	}
 	fprintf(stdout, "(To select a kiosk type its number)\n\n");
 	
@@ -84,31 +114,31 @@ int client_handler()
 		//read from stdin
 		if(!fgets(stdin_buf, sizeof(stdin_buf), stdin))
 		{
-			fprintf(stderr, "%sclient had an issue occurred while reading from stdin\n", err_msg);
-			for(i = 0; i < datacenter_count; i++)
-			{
-				free(datacenters[i].hostname);
-			}
-			return 1;
+			fprintf(stderr, "%sX%s (%s) had an issue occurred while reading from stdin\n", 
+				err_m, cls_m, fnc_m);
+			return free_dc_sys(dc_sys, dc_addr_count);
 		}
 
 		//validate input from stdin
 		errno = 0;
-		datacenter_id = strtol(stdin_buf, &end, 10);
-		if((*end != 0 && *end != 9 && *end != 10 && *end != 32) || errno != 0 || datacenter_id < 1 
-			|| datacenter_id > datacenter_count || datacenters[datacenter_id-1].running == 0)
+		i_dc = strtol(stdin_buf, &end, 10);
+		if((*end != 0 && *end != 9 && *end != 10 && *end != 32) || errno != 0 || i_dc < 1 || i_dc > dc_addr_count)
 		{
 			fprintf(stdout, "An invalid value was provided while selecting a kiosk, please try again.\n\n");
 		}
+		else if(dc_sys[i_dc-1].online == 0)
+		{
+			fprintf(stdout, "The selected kiosk is currently offline, please try again.\n\n");
+		}
 		else
 		{
-			fprintf(stdout, "You have selected Kiosk #%d\n\n", datacenter_id);
+			fprintf(stdout, "You have selected Kiosk #%d\n\n", i_dc);
 			break;
 		}
 	}
 
 	//ask the user to specify the number of tickets they would like to buy
-	fprintf(stdout, "How many tickets would you like to buy?\n(maximum purchase allowed: 100 tickets)\n\n");
+	fprintf(stdout, "How many tickets would you like to buy?\n\n");
 	
 	while(1)
 	{
@@ -118,145 +148,150 @@ int client_handler()
 		//read from stdin
 		if(!fgets(stdin_buf, sizeof(stdin_buf), stdin))
 		{
-			fprintf(stderr, "%sclient had an issue occurred while reading from stdin\n", err_msg);
-			for(i = 0; i < datacenter_count; i++)
-			{
-				free(datacenters[i].hostname);
-			}
-			return 1;
+			fprintf(stderr, "%sX%s (%s) had an issue occurred while reading from stdin\n", 
+				err_m, cls_m, fnc_m);
+			return free_dc_sys(dc_sys, dc_addr_count);
 		}
 
 		//validate input from stdin
 		errno = 0;
 		ticket_count = strtol(stdin_buf, &end, 10);
-		if((*end != 0 && *end != 9 && *end != 10 && *end != 32) || errno != 0 || ticket_count < 0 || ticket_count > 100)
+		if((*end != 0 && *end != 9 && *end != 10 && *end != 32) || errno != 0 || ticket_count < 0)
 		{
 			fprintf(stdout, "An invalid value was provided while specifying the number of tickets to buy, please try again.\n\n");
 		}
 		else
 		{
-			if(ticket_count == 1)
-			{
-				fprintf(stdout, "You have requested to buy %d ticket.\n\n", ticket_count);
-			}
-			else
-			{
-				fprintf(stdout, "You have requested to buy %d tickets\n\n", ticket_count);
-			}
+			fprintf(stdout, "You have requested to buy %d ", ticket_count);
+			print_tickets(ticket_count);
+			fprintf(stdout, ".\n\n");
 			break;
 		}
 	}
-	fprintf(stdout, "Your request is now being sent to Kiosk #%d for processing...\n", datacenter_id);
 
-	RETRY:
+	fprintf(stdout, "Your request is now being sent to Kiosk #%d.\n", i_dc);
+
 	//setup the datacenter address object
-	datacenter_addr_len = sizeof(datacenter_addr);
-	memset((char *)&datacenter_addr, 0, datacenter_addr_len);
-	datacenter_addr.sin_family = AF_INET;
-	datacenter_addr.sin_addr.s_addr = inet_addr(datacenters[datacenter_id-1].hostname);
-	datacenter_addr.sin_port = htons(client_recv_port);
+	dc_addr_len = sizeof(dc_addr);
+	memset((char *)&dc_addr, 0, dc_addr_len);
+	dc_addr.sin_family = AF_INET;
+	dc_addr.sin_addr.s_addr = inet_addr(dc_sys[i_dc-1].hostname);
+	dc_addr.sin_port = htons(cl_recv_port);
 
-	//open a client socket
-	status = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	if(status < 0)
+	//attempt to connect to the datacenter, retying if it is busy
+	while(1)
 	{
-		fprintf(stderr, "%sclient failed to open a socket (status: %d/errno: %d)\n", err_msg, status, errno);
-		return 1;
-	}
-	client_sock_fd = status;
-
-	//connect to the datacenter
-	status = connect(client_sock_fd, (struct sockaddr*)&datacenter_addr, datacenter_addr_len);
-	if(status < 0)
-	{
-		fprintf(stdout, "Kiosk #%d has gone offline since the time you selected it, please try again later.\n", datacenter_id);
-		return 1;
-	}
-
-	//send the datacenter the number of tickets requested
-	sprintf(msg_buf, "%d", ticket_count);
-	delay(msg_delay);
-	status = send(client_sock_fd, msg_buf, msg_buf_max, 0);
-	if(status == -1 && errno == 104)
-	{
-		//close the socket connection to the datacenter and try again
-		fprintf(stdout, "Kiosk #%d was busy, retrying...\n", datacenter_id);
-		status = close(client_sock_fd);
+		//open a client socket
+		status = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 		if(status < 0)
 		{
-			fprintf(stderr, "%sclient failed to cleanly close the socket (status: %d/errno: %d)\n", err_msg, status, errno);
-			return 1;
+			fprintf(stderr, "%sX%s (%s) failed to open a socket (errno: %s)\n", 
+					err_m, cls_m, fnc_m, strerror(errno));
+			return free_dc_sys(dc_sys, dc_addr_count);
 		}
-		goto RETRY;
+		cl_sock_fd = status;
+
+		//connect to the datacenter
+		status = connect(cl_sock_fd, (struct sockaddr*)&dc_addr, dc_addr_len);
+		if(status < 0)
+		{
+			fprintf(stdout, "Kiosk #%d has gone offline since the time you selected it, please try again later.\n", i_dc);
+			return free_dc_sys(dc_sys, dc_addr_count);
+		}
+
+		//send the datacenter the number of tickets requested
+		memset(msg_buf, 0, msg_buf_max);
+		sprintf(msg_buf, "%d", ticket_count);
+		status = send(client_sock_fd, msg_buf, msg_buf_max, 0);
+		if(status == -1 && errno == 104)
+		{
+			//close the socket connection to the datacenter and try again
+			if(retry_count == 0)
+			{
+				fprintf(stdout, "Kiosk #%d was busy serving another client, retrying.", dc_id);
+			}
+			else
+			{
+				fprintf(stdout, ".");	
+			}
+			retry_count++;
+			status = close(cl_sock_fd);
+			if(status < 0)
+			{
+				fprintf(stderr, "%sX%s (%s) failed to cleanly close the socket (errno: %s)\n", 
+					err_m, cls_m, fnc_m, strerror(errno));
+				return free_dc_sys(dc_sys, dc_addr_count);
+			}
+			continue;
+		}
+		else if(status != msg_buf_max)
+		{
+			fprintf(stderr, "%sX%s (%s) encoutnered an issue while sending request (status: %d/errno: %s)\n", 
+				err_m, cls_m, fnc_m, status, strerror(errno));
+			return free_dc_sys(dc_sys, dc_addr_count);
+		}
 	}
-	if(status != msg_buf_max)
-	{
-		fprintf(stderr, "%sclient encoutnered an issue while sending request (status: %d/errno: %d)\n", err_msg, status, errno);
-		return 1;
-	}
+	fprintf(stdout, "\n\nKiosk #%d has received your request, please wait for processing to complete.\n\n", dc_id);
 
 	//wait to receive a response from the datacenter
-	status = recv(client_sock_fd, msg_buf, msg_buf_max, 0);
-	if(status == -1 && errno == 104)
+	memset(msg_buf, 0, msg_buf_max);
+	status = recv(cl_sock_fd, msg_buf, msg_buf_max, 0);
+	if(status != msg_buf_max)
 	{
-		//close the socket connection to the datacenter and try again
-		fprintf(stdout, "Kiosk #%d was busy, retrying...\n", datacenter_id);
-		status = close(client_sock_fd);
-		if(status < 0)
-		{
-			fprintf(stderr, "%sclient failed to cleanly close the socket (status: %d/errno: %d)\n", err_msg, status, errno);
-			return 1;
-		}
-		goto RETRY;
+		fprintf(stderr, "%sX%s (%s) encoutnered an issue while receiving the response (status: %d/errno: %s)\n", 
+				err_m, cls_m, fnc_m, status, strerror(errno));
+		return free_dc_sys(dc_sys, dc_addr_count);
 	}
-	else if(status != msg_buf_max)
-	{
-		fprintf(stdout, "%sclient encountered an issue while reading the response (status: %d/errno: %d)\n", err_msg, status, errno);
-		return 1;
-	}
+	fprintf(stdout, "Processing complete.\n\n", );
 
 	//convert response to an int
 	errno = 0;
-	request_response = strtol(msg_buf, &end, 10);
-	if(*end != 0 || errno != 0 || request_response < 0 || request_response > 1)
+	rspn = strtol(msg_buf, &end, 10);
+	if(*end != 0 || errno != 0 || rspn < 0 || rspn > 1)
 	{
-		fprintf(stderr, "%sclient encountered an error while converting request response (errno: %d)", err_msg, errno);
-		return 1;
+		fprintf(stderr, "%sX%s (%s) encoutnered an issue while converting the response (errno: %s)\n", 
+				err_m, cls_m, fnc_m, strerror(errno));
+		return free_dc_sys(dc_sys, dc_addr_count);
 	}
 
 	//close the socket connection to the datacenter
 	status = close(client_sock_fd);
 	if(status < 0)
 	{
-		fprintf(stderr, "%sclient failed to cleanly close the socket (status: %d/errno: %d)\n", err_msg, status, errno);
-		return 1;
+		fprintf(stderr, "%sX%s (%s) failed to cleanly close the socket (errno: %s)\n", 
+					err_m, cls_m, fnc_m, strerror(errno));
+		return free_dc_sys(dc_sys, dc_addr_count);
 	}
 
-	//tell client result of request
-	if(request_response == 1)
+	//tell client the response
+	if(rspn == 1)
 	{
-		if(ticket_count == 1)
-		{
-			fprintf(stdout, "Your request to buy %d ticket was accepted.\n\n", ticket_count);
-		}
-		else
-		{
-			fprintf(stdout, "Your request to buy %d tickets was accepted.\n\n", ticket_count);
-		}		
+		fprintf(stdout, "Your request to buy %d ", ticket_count);
+		print_tickets(ticket_count);
+		fprintf(stdout, " was accepted.\n\n");		
 	}
 	else
 	{
-		if(ticket_count == 1)
-		{
-			fprintf(stdout, "Your request to buy %d ticket was rejected.\n\n", ticket_count);
-		}
-		else
-		{
-			fprintf(stdout, "Your request to buy %d tickets was rejected.\n\n", ticket_count);
-		}	
+		fprintf(stdout, "Your request to buy %d ", ticket_count);
+		print_tickets(ticket_count);
+		fprintf(stdout, " was rejected.\n\n");
 	}
 
 	fprintf(stdout, "Thank you for shopping with Ciosk!\n");
 
 	return 0;
+}
+
+//free heap memory allocated to the datacenters
+int32_t free_dc_sys(dc_obj *dc_sys[], int32_t dc_addr_count)
+{
+	int32_t i;
+
+	for(i = 0; i < dc_addr_count; i++)
+	{
+		free(dc_sys[i].hostname);
+	}
+	free(dc_sys);
+
+	return 1;
 }

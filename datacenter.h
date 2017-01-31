@@ -5,7 +5,7 @@
 #include "global.h"
 
 /*functions*/
-int datacenter_handler();
+int32_t datacenter_handler();
 void *cl_lstn_thread(void *args);
 void *dc_lstn_thread(void *args);
 void *dc_bcst_thread(void *args);
