@@ -50,10 +50,11 @@ int datacenter_handler()
 	struct flock *fl;
 	int32_t fd;
 	time_t boot_time;
+	char stdin_buf[256];
 	config_setting_t *dc_addr_settings;
 	config_setting_t *dc_addr_elem_setting;
 	pthread_t cl_lstn_thread_id;
-	pthread_t dc_bcst_thread_id;
+	pthread_t *dc_bcst_thread_id;
 	// pthread_t dc_lstn_thread_id;
 
 
@@ -112,6 +113,7 @@ int datacenter_handler()
 		config_setting_lookup_string(dc_addr_elem_setting, "hostname", &hn);
 		dc_sys[i].hostname = (char *)malloc(strlen(hn) + 1);
 		memcpy(dc_sys[i].hostname, hn, strlen(hn) + 1);
+		pthread_mutex_init(&(dc_sys[i].lock), NULL);
 
 		//set the index for the first availble datacenter not currently online
 		if(!dc_sys[i].online && !init_this_dc)
@@ -153,8 +155,56 @@ int datacenter_handler()
 	fprintf(stdout, "- Datacenter Broadcast Base Port: %d\n",dc_lstn_port_base);
 	fprintf(stdout, "- Datacenter Hostname: %s\n\n\n", this_dc.hostname);
 
+	//SPAWN DC SERVER
+
+	//wait for user input to connect to other datacenters
+	fprintf(stdout, "Please press the Enter key to connect to all other online datacenters.\n>>>", );
+	fgets(stdin_buf, sizeof(stdin_buf), stdin);
+	fprintf(stdout, "\nNow connecting...\n", );
+
+	//create threads for broadcasting online/request/release packets
+	dc_bcst_thread_ids = (pthread_t *)malloc((dc_addr_count)*sizeof(pthread_t));
+	fflush_out_err();
+	for(i = 0; i < dc_addr_count; i++)
+	{
+		//don't broadcast message to self
+		if(dc_sys[i].id == this_dc.id)
+		{
+			continue;
+		}
+		dc_bcst_args = (dc_bcst_arg_t *)malloc(sizeof(dc_bcst_arg_t));
+		dc_bcst_args->dest_id = dc_sys[i].id;
+		dc_bcst_args->port_base = dc_lstn_port_base;
+		fflush_out_err();
+		status = pthread_create(&(dc_bcst_thread_ids[i]), NULL, dc_bcst_thread, (void *)dc_bcst_args);
+		if(status != 0)
+		{
+			dc_log(stderr, "%s%d%s (%s) failed to spawn dc_bcst_thread (errno: %s)\n", err_m, fnc_m, 1);
+			return 1;
+		}
+		pthread_mutex_lock(&pool_lock);
+	}
+
+	//update the number of other datacenters online
+	for(i = 0; i < dc_addr_count; i++)
+	{
+		pthread_mutex_lock(&(dc_sys[i].lock));
+		//don't count self
+		if(dc_sys[i].id == this_dc.id)
+		{
+			pthread_mutex_unlock(&(dc_sys[i].lock));
+			continue;
+		}
+		if(dc_sys[i].online == 1)
+		{
+			dc_sys_online++;
+		}
+		pthread_mutex_unlock(&(dc_sys[i].lock));
+	}
+
 	//spawn cl_lstn_thread
 	cl_lstn_args = (arg_t *)malloc(sizeof(arg_t));
+	cl_lstn_args->count = dc_addr_count;
 	cl_lstn_args->port = cl_lstn_port;
 	fflush_out_err();
 	status = pthread_create(&cl_lstn_thread_id, NULL, cl_lstn_thread, (void *)cl_lstn_args);
@@ -196,6 +246,18 @@ int datacenter_handler()
 
 
 	//JOIN THREADS
+
+	//join threads once all broadcast ipc has completed
+	for(i = 0; i < dc_addr_count; i++)
+	{
+		fflush_out_err();
+		status = pthread_join(dc_bcst_thread_ids[i], (void **)&dc_bcst_rets);
+		fflush_out_err();
+		ret += dc_bcst_rets->ret;
+		free(dc_bcst_rets);
+	}
+	free(dc_bcst_thread_ids);
+
 
 	dc_log(stdout, "%s%d%s (%s) finished joining primary child threads\n", log_m, fnc_m, 0);
 
@@ -259,6 +321,7 @@ void dc_init()
 	pthread_mutex_lock(&pool_lock);
 	pthread_mutex_lock(&bcst_lock);
 	this_clk.clk = 0;
+	dc_sys_online = 0;
 }
 
 int32_t dc_log(FILE *std_strm, char *msg, char *opn_m char *fnc_m, int32_t errrno_f)
@@ -273,7 +336,35 @@ int32_t dc_log(FILE *std_strm, char *msg, char *opn_m char *fnc_m, int32_t errrn
 		fprintf(std_strm, msg, opn_m, this_clk.clk, cls_m, fnc_m);
 	}
 	pthread_mutex_unlock(this_clk.clk);
+	fflush_out_err();
 	return 1;
+}
+
+uint8_t *packet_stream encode_packet(int32_t p_type, int32_t p_id, int32_t p_clk, int32_t p_pool)
+{
+	packet_t packet;
+	uint8_t *packet_stream = (uint8_t *)malloc(sizeof(packet));
+
+	packet.type = hton32((uint32_t)p_type);
+	packet.id = hton32((uint32_t)p_id);
+	packet.clk = hton32((uint32_t)p_clk);
+	packet.pool = hton32((uint32_t)p_pool);
+
+	packet_stream = (uint8_t *)packet;
+	return packet_stream;
+}
+
+packet_t *packet decode_packet(uint8_t *packet_stream)
+{
+	packet_t *packet = (packet_t *)malloc(sizeof(packet));
+
+	packet = (packet_t *)packet_stream;
+	packet->type = ntoh32(packet->type);
+	packet->id = ntoh32(packet->id);
+	packet->clk = ntoh32(packet->clk);
+	packet->pool = ntoh32(packet->pool);
+
+	return packet;
 }
 
 //acts as a frontend for communicating with the client
@@ -284,6 +375,7 @@ void *cl_lstn_thread(void *args)
 	int32_t status;
 	int32_t cl_lstn_sock_fd;
 	int32_t cl_rspd_sock_fd;
+	int32_t count;
 	int32_t port;
 	int32_t ticket_amount;
 	char msg_buf[msg_buf_max];
@@ -293,11 +385,12 @@ void *cl_lstn_thread(void *args)
 	struct sockaddr_in cl_rspd_addr;
 	socklen_t cl_lstn_addr_len;
 	socklen_t cl_rspd_addr_len;
-	arg_obj *thread_args = (arg_obj *)args;
-	ret_obj *thread_rets = (ret_obj *)malloc(sizeof(ret_obj));
+	cl_lstn_arg_t *thread_args = (cl_lstn_arg_t *)args;
+	ret_t *thread_rets = (ret_t *)malloc(sizeof(ret_obj));
 
 	//read out data packed in the args parameter
 	fflush_out_err();
+	count = thread_args->count;
 	port = thread_args->port;
 	free(thread_args);
 	thread_rets->ret = 0;
@@ -317,7 +410,7 @@ void *cl_lstn_thread(void *args)
 		pthread_exit((void *)thread_rets);
 	}
 	cl_lstn_sock_fd = status;
-	dc_log(stdout, "%s%d%s (%s) finished initializing a socket for client connections\n", log_m, fnc_m, 0);
+	dc_log(stdout, "%s%d%s (%s) finished initializing a socket for incoming client connections\n", log_m, fnc_m, 0);
 
 	//check if the system is still holding onto the port after a recent restart
 	status = setsockopt(cl_lstn_sock_fd, SOL_SOCKET, SO_REUSEADDR, (const void *)&sockopt, sizeof(int));
@@ -350,10 +443,12 @@ void *cl_lstn_thread(void *args)
 	//continuosly accept new client connections until an error occurs or the thread is ended
 	while(1)
 	{
-		pthread_mutex_lock(&this_clk.lock);
+		pthread_mutex_lock(&(ticket_pool.lock));
+		pthread_mutex_lock(&(this_clk.lock));
 		fprintf(stdout, "%s%d%s (%s) ticket pool amount before accepting a new client: %d\n", 
-			log_m, this_clk.clk, cls_m, fnc_m, *pool);
-		pthread_mutex_unlock(&this_clk.lock);
+			log_m, this_clk.clk, cls_m, fnc_m, ticket_pool.pool);
+		pthread_mutex_unlock(&(this_clk.lock));
+		pthread_mutex_unlock(&(ticket_pool.lock));
 
 		//accept connection from client
 		status = accept(cl_lstn_sock_fd, (struct sockaddr *)&cl_rspd_addr, &ccl_rspd_addr_len);
@@ -370,7 +465,7 @@ void *cl_lstn_thread(void *args)
 		status = recv(cl_rspd_sock_fd, msg_buf, msg_buf_max, 0);
 		if(status != msg_buf_max)
 		{
-			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) encountered an issue while reading the message (status: %d/errno: %d)\n", err_m, fnc_m, 1);
+			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) encountered an issue while reading the message (errno: %d)\n", err_m, fnc_m, 1);
 			pthread_exit((void *)thread_rets);
 		}
 		dc_log(stdout, "%s%d%s (%s) received a request from a client\n", log_m, fnc_m, 0);
@@ -385,50 +480,53 @@ void *cl_lstn_thread(void *args)
 		}
 
 		//WAIT FOR THREADS TO NEGOTIATE ACCESS TO TICKET POOL
-		pthread_mutex_unlock(&bcst_lock);
-		pthread_mutex_lock(&pool_lock);
+		for(i = 0; i < dc_sys_online; i++)
+		{
+			pthread_mutex_unlock(&bcst_lock);
+			pthread_mutex_lock(&pool_lock);
+		}
 
 		dc_log(stdout, "%s%d%s (%s) ticket pool control has been obtained, processing request\n", log_m, fnc_m, 0);
 
 		//set a flag indicating whether the request message was accepted
+		pthread_mutex_lock(&(ticket_pool.lock));
+		pthread_mutex_lock(&this_clk.lock);
 		memset(msg_buf, 0, msg_buf_max);
-		if(ticket_amount > ticket_pool)
+		if(ticket_amount > ticket_pool.pool)
 		{
 			strcpy(msg_buf, "0");
-			pthread_mutex_lock(&this_clk.lock);
 			fprintf(stdout, "%s%d%s (%s) rejected a request from a client for %d ", ticket_amount);
-			pthread_mutex_unlock(&this_clk.lock);
 			print_tickets(ticket_amount);
-			fprintf(stdout, " (%d ", ticket_pool);
+			fprintf(stdout, " (%d ", ticket_pool.pool);
 			print_tickets(ticket_pool);
 			fprintf(stdout, " remaining in the pool)\n");
-			fflush_out_err();
 		}
 		else
 		{
-			ticket_pool -= ticket_amount;
+			ticket_pool.pool -= ticket_amount;
 			strcpy(msg_buf, "1");
-			pthread_mutex_lock(&this_clk.lock);
 			fprintf(stdout, "%s%d%s (%s) accepted a request from a client for %d ", ticket_amount);
-			pthread_mutex_unlock(&this_clk.lock);
 			print_tickets(ticket_amount);
-			fprintf(stdout, " (%d ", ticket_pool);
+			fprintf(stdout, " (%d ", ticket_pool.pool);
 			print_tickets(ticket_pool);
 			fprintf(stdout, " remaining in the pool)\n");
-			fflush_out_err();
 		}
-
+		thread_mutex_unlock(&this_clk.lock);
+		pthread_mutex_unlock(&(ticket_pool.lock));
 		dc_log(stdout, "%s%d%s (%s) request completed, allowing release of ticket pool control\n", log_m, fnc_m, 0);
 
 		//ALLOW THREADS TO RELEASE ACCESS OF TICKET POOL
-		pthread_mutex_unlock(&bcst_lock);
-		pthread_mutex_lock(&pool_lock);
+		for(i = 0; i < dc_sys_online; i++)
+		{
+			pthread_mutex_unlock(&bcst_lock);
+			pthread_mutex_lock(&pool_lock);
+		}
 
 		//send the client the request results
 		status = send(cl_rspd_sock_fd, msg_buf, msg_buf_max, 0);
 		if(status != msg_buf_max)
 		{
-			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) encountered an issue while sending the message (status: %d/errno: %s)\n", err_m, fnc_m, 1);
+			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) encountered an issue while sending the message (errno: %s)\n", err_m, fnc_m, 1);
 			pthread_exit((void *)thread_rets);;
 		}
 		dc_log(stdout, "%s%d%s (%s) sent the request results back to the client\n", log_m, fnc_m, 0);
@@ -772,565 +870,177 @@ void *dc_bcst_thread(void *args)
 	int32_t i;
 	int32_t status;
 	int32_t ret;
+	int32_t dest_id;
+	int32_t port_base;
+	int32_t dc_bcst_sock_fd;
 	char *fnc_m = "dc_bcst_thread";
-	pthread_t *dc_send_thread_ids;
-	arg_t *dc_send_args;
+	uint8_t *packet_stream;
+	packet_t *packet;
+	struct sockaddr_in dc_bcst_addr;
+	socklen_t dc_bcst_addr_len;
+	dc_send_arg_t *dc_send_args;
 	ret_t *dc_send_rets;
 	
 	//unpack args
 	fflush_out_err();
-	count = thread_args->count;
-	port = thread_args->port;
+	dest_id = thread_args->dest_id;
+	port_base = thread_args->port_base;
 	free(thread_args);
 	thread_rets->ret = 0;
 
+	//setup address to connect to the datacenter of dest_id on the port associated with this_dc's id
+	dc_bcst_addr_len = sizeof(dc_bcst_addr);
+	memset((char *)&dc_bcst_addr, 0, dc_bcst_addr_len);
+	dc_bcst_addr.sin_family = AF_INET;
+	dc_bcst_addr.sin_addr.s_addr = inet_addr(dc_sys[dest_id-1].hostname);
+	dc_bcst_addr.sin_port = htons(port_base + this_dc.id);
+
+	//open a server socket in the datacenter to connect to other datacenter servers
+	status = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if(status < 0)
+	{
+		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) failed to open a socket (errno: %s)\n", err_m, fnc_m, 1);
+		pthread_exit((void *)thread_rets);
+	}
+	dc_bcst_sock_fd = status;
+	dc_log(stdout, "%s%d%s (%s) finished initializing a socket for an outgoing server connection\n", log_m, fnc_m, 0);
+
+	//connect to the datacenter
+	status = connect(dc_bcst_sock_fd, (struct sockaddr*)&dc_bcst_addr, dc_bcst_addr_len);
+	if(status < 0)
+	{
+		//datacenter was offline
+		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) failed to connect to the datacenter server (errno: %s)\n", err_m, fnc_m, 1);
+		pthread_mutex_lock(&(dc_sys[dest_id-1].lock));
+		dc_sys[dest_id-1].online = 0;
+		pthread_mutex_unlock(&(dc_sys[dest_id-1].lock));
+		pthread_mutex_unlock(&pool_lock);
+		pthread_exit((void *)thread_rets);
+	}
+
+	//build a packet signaling this datacenter is now online
+	pthread_mutex_lock(&(ticket_pool.lock));
+	pthread_mutex_lock(&(this_clk.lock));
+	packet_stream = encode_packet(ONLINE, this_dc.id, this_clk.clk, ticket_pool.pool);
+
+	//send the datacenter the online packet
+	status = send(dc_bcst_sock_fd, packet_stream, sizeof(packet_stream), 0);
+	if(status != sizeof(packet_stream))
+	{
+		pthread_mutex_unlock(&(this_clk.lock));
+		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) encountered an issue while sending the online packet (errno: %s)\n", err_m, fnc_m, 1);
+		pthread_exit((void *)thread_rets);
+	}
+	free(packet_stream);
+
+	//receive the ack packet back from the server
+	status = recv(dc_bcst_sock_fd, packet_stream, sizeof(packet_stream), 0);
+	if(status != sizeof(packet_stream))
+	{
+		pthread_mutex_unlock(&(this_clk.lock));
+		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) encountered an issue while receving the ack packet for the online packet (errno: %d)\n", err_m, fnc_m, 1);
+		pthread_exit((void *)thread_rets);
+	}
+
+	//decode packet, make sure online signal was ack'd
+	packet = decode_packet(packet_stream);
+	if(packet->id != this_dc.id || packet->type != ACK)
+	{
+		pthread_mutex_unlock(&(this_clk.lock));
+		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) received an invalid ack packet for the online packet\n", err_m, fnc_m, 0);
+		pthread_exit((void *)thread_rets);
+	}
+	free(packet);
+	pthread_mutex_lock(&(dc_sys[dest_id-1].lock));
+	dc_sys[dest_id-1].online = 1;
+	pthread_mutex_unlock(&(dc_sys[dest_id-1].lock));
+	pthread_mutex_unlock(&(this_clk.lock));
+	pthread_mutex_unlock(&(ticket_pool.lock));
+	pthread_mutex_unlock(&pool_lock);
+
+	//handle request/release communication per client transaction
 	while(1)
 	{
-		//i==0 for pool request packet broadcast, i==1 for pool release packet broadcast
-		for(i = 0; i < 1; i++)
+		pthread_mutex_lock(&bcst_lock);
+
+		//build a packet signaling this datacenter is requesting control of the ticket pool
+		pthread_mutex_lock(&(ticket_pool.lock));
+		pthread_mutex_lock(&(this_clk.lock));
+		packet_stream = encode_packet(REQUEST, this_dc.id, this_clk.clk, ticket_pool.pool);
+
+		//send the datacenter the request packet
+		status = send(dc_bcst_sock_fd, packet_stream, sizeof(packet_stream), 0);
+		if(status != sizeof(packet_stream))
 		{
-			pthread_mutex_lock(&bcst_lock);
-
-			//create threads for broadcasting the request
-			dc_send_thread_ids = (pthread_t *)malloc((count)*sizeof(pthread_t));
-			fflush_out_err();
-			for(i = 0; i < count; i++)
-			{
-				//don't broadcast message to self
-				if(i == this_dc.id)
-				{
-					continue;
-				}
-				dc_send_args = (arg_t *)malloc(sizeof(arg_t));
-				//data to send
-				fflush_out_err();
-				status = pthread_create(&(dc_send_thread_ids[i]), NULL, dc_send_thread, (void *)dc_send_args);
-				if(status != 0)
-				{
-					thread_rets->ret = dc_log(stderr, "%s%d%s (%s) failed to spawn dc_send_thread (errno: %s)\n", err_m, fnc_m, 1);
-					pthread_exit((void *)thread_rets);
-				}
-			}
-
-			//join threads once all broadcast ipc has completed
-			for(i = 0; i < count; i++)
-			{
-				fflush_out_err();
-				status = pthread_join(dc_send_thread_ids[i], (void **)&dc_send_rets);
-				fflush_out_err();
-				ret += dc_send_rets->ret;
-				free(dc_send_rets);
-			}
-			free(dc_send_thread_ids);
-			
-			pthread_mutex_unlock(&pool_lock);
+			pthread_mutex_unlock(&(this_clk.lock));
+			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) encountered an issue while sending the request packet (errno: %s)\n", err_m, fnc_m, 1);
+			pthread_exit((void *)thread_rets);
 		}
+		free(packet_stream);
+
+		//receive the ack packet back from the server
+		status = recv(dc_bcst_sock_fd, packet_stream, sizeof(packet_stream), 0);
+		if(status != sizeof(packet_stream))
+		{
+			pthread_mutex_unlock(&(this_clk.lock));
+			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) encountered an issue while receving the ack packet for the request packet (errno: %d)\n", err_m, fnc_m, 1);
+			pthread_exit((void *)thread_rets);
+		}
+
+		//decode packet, make sure request signal was ack'd
+		packet = decode_packet(packet_stream);
+		if(packet->id != this_dc.id || packet->type != ACK)
+		{
+			pthread_mutex_unlock(&(this_clk.lock));
+			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) received an invalid ack packet for the request packet\n", err_m, fnc_m, 0);
+			pthread_exit((void *)thread_rets);
+		}
+		free(packet);
+		pthread_mutex_unlock(&(this_clk.lock));
+		pthread_mutex_unlock(&(ticket_pool.lock));
+
+		//HAVE CONTROL OF POOL
+		pthread_mutex_unlock(&pool_lock);
+		pthread_mutex_lock(&bcst_lock);
+
+		//build a packet signaling this datacenter is releasing control of the ticket pool
+		pthread_mutex_lock(&(ticket_pool.lock));
+		pthread_mutex_lock(&(this_clk.lock));
+		packet_stream = encode_packet(RELEASE, this_dc.id, this_clk.clk, ticket_pool.pool);
+
+		//send the datacenter the release packet
+		status = send(dc_bcst_sock_fd, packet_stream, sizeof(packet_stream), 0);
+		if(status != sizeof(packet_stream))
+		{
+			pthread_mutex_unlock(&(this_clk.lock));
+			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) encountered an issue while sending the release packet (errno: %s)\n", err_m, fnc_m, 1);
+			pthread_exit((void *)thread_rets);
+		}
+		free(packet_stream);
+
+		//receive the ack packet back from the server
+		status = recv(dc_bcst_sock_fd, packet_stream, sizeof(packet_stream), 0);
+		if(status != sizeof(packet_stream))
+		{
+			pthread_mutex_unlock(&(this_clk.lock));
+			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) encountered an issue while receving the ack packet for the release packet (errno: %d)\n", err_m, fnc_m, 1);
+			pthread_exit((void *)thread_rets);
+		}
+
+		//decode packet, make sure release signal was ack'd
+		packet = decode_packet(packet_stream);
+		if(packet->id != this_dc.id || packet->type != ACK)
+		{
+			pthread_mutex_unlock(&(this_clk.lock));
+			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) received an invalid ack packet for the release packet\n", err_m, fnc_m, 0);
+			pthread_exit((void *)thread_rets);
+		}
+		free(packet);
+		pthread_mutex_unlock(&(this_clk.lock));
+		pthread_mutex_unlock(&(ticket_pool.lock));
+		pthread_mutex_unlock(&pool_lock);
 	}
 
 	fflush_out_err();
 	pthread_exit((void *)thread_rets);
-}
-
-void *dc_send_thread(void *args)
-{
-		int msg_buf_max = 4096;
-	int retransmit = 0;
-	int i;
-	int status;
-	int id;
-	int port;
-	int count;
-	int datacenter_send_sock_fd;
-	int *requested;
-	int clock_queue_min = 1;
-	int id_queue_min = 1;
-	int comm_flag;
-	int msg_delay;
-	char msg_buf[msg_buf_max];
-	char *end;
-	struct sockaddr_in datacenter_send_addr;
-	socklen_t datacenter_send_addr_len;
-	datacenter_obj *datacenters;
-	arg_obj *thread_args = (arg_obj *)args;
-	ret_obj *thread_rets = (ret_obj *)malloc(sizeof(ret_obj));
-	fflush_out_err();
-	id = thread_args->id;
-	requested = thread_args->requested;
-	msg_delay = thread_args->delay;
-	count = thread_args->count;
-	port = thread_args->port;
-	datacenters = thread_args->datacenters;
-	free(thread_args);
-	int clock_queue_res[count+1];
-	int id_queue_res[count+1];
-
-	while(1)
-	{
-		while(request_sig == 0);
-		fprintf(stdout, "%sdatacenter_send %d request_sig has been triggered\n", log_m, id);
-
-		RETRANSMIT:
-		for(i = 0; i < count; i++)
-		{
-			//skip yourself
-			if(id == i+1)
-			{
-				continue;
-			}
-			fprintf(stdout, "%sdatacenter_send %d sending request message to datacenter #%d\n", log_m, id, i+1);
-
-			comm_flag = 0;
-			datacenter_send_addr_len = sizeof(datacenter_send_addr);
-			memset((char *)&datacenter_send_addr, 0, datacenter_send_addr_len);
-			datacenter_send_addr.sin_family = AF_INET;
-			datacenter_send_addr.sin_addr.s_addr = inet_addr(datacenters[i].hostname);
-			datacenter_send_addr.sin_port = htons(port);
-
-			//open a datacenter_send socket
-			status = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-			if(status < 0)
-			{
-				fprintf(stderr, "%sdatacenter_send failed to open a socket (status: %d/errno: %d)\n", err_m, status, strerror(errno));
-				thread_rets->ret = 1;
-				break;
-			}
-			datacenter_send_sock_fd = status;
-
-			//connect to datacenter
-			status = connect(datacenter_send_sock_fd, (struct sockaddr*)&datacenter_send_addr, datacenter_send_addr_len);
-			if(status < 0)
-			{
-				fprintf(stdout, "%sdatacenter_send skipping datacenter %d since it's not online\n", log_m, i+1);
-				continue;
-			}
-
-			//send the datacenter the process id
-			RETRY_COMMA_SEND:
-			sprintf(msg_buf, "%d", comm_flag);
-			delay(msg_delay);
-			status = send(datacenter_send_sock_fd, msg_buf, msg_buf_max, 0);
-			if(status == -1 && errno == 104)
-			{
-				//close the socket connection to the datacenter and try again
-				fprintf(stdout, "%sdatacenter_send was interrupted while sending comma, retrying...\n", log_m);
-				status = close(datacenter_send_sock_fd);
-				if(status < 0)
-				{
-					fprintf(stderr, "%sdatacenter_send failed to cleanly close the socket (status: %d/errno: %d)\n", 
-						err_m, status, strerror(errno));
-					thread_rets->ret = 1;
-					break;
-				}
-				//open a datacenter_send socket
-				status = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-				if(status < 0)
-				{
-					fprintf(stderr, "%sdatacenter_send failed to open a socket (status: %d/errno: %d)\n", err_m, status, strerror(errno));
-					thread_rets->ret = 1;
-					break;
-				}
-				datacenter_send_sock_fd = status;
-				//connect to datacenter
-				status = connect(datacenter_send_sock_fd, (struct sockaddr*)&datacenter_send_addr, datacenter_send_addr_len);
-				if(status < 0)
-				{
-					fprintf(stdout, "%sdatacenter_send skipping datacenter %d since it's not online\n", log_m, i+1);
-					continue;
-				}
-				goto RETRY_COMMA_SEND;
-			}
-			else if(status != msg_buf_max)
-			{
-				fprintf(stderr, "%sdatacenter_send encoutnered an issue while sending request (status: %d/errno: %d)\n", 
-					err_m, status, strerror(errno));
-				thread_rets->ret = 1;
-				break;
-			}
-
-			//send the datacenter the process id
-			RETRY_ID_SEND:
-			sprintf(msg_buf, "%d", id);
-			delay(msg_delay);
-			status = send(datacenter_send_sock_fd, msg_buf, msg_buf_max, 0);
-			if(status == -1 && errno == 104)
-			{
-				//close the socket connection to the datacenter and try again
-				fprintf(stdout, "%sdatacenter_send was interrupted while sending id, retrying...\n", log_m);
-				status = close(datacenter_send_sock_fd);
-				if(status < 0)
-				{
-					fprintf(stderr, "%sdatacenter_send failed to cleanly close the socket (status: %d/errno: %d)\n", 
-						err_m, status, strerror(errno));
-					thread_rets->ret = 1;
-					break;
-				}
-				//open a datacenter_send socket
-				status = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-				if(status < 0)
-				{
-					fprintf(stderr, "%sdatacenter_send failed to open a socket (status: %d/errno: %d)\n", err_m, status, strerror(errno));
-					thread_rets->ret = 1;
-					break;
-				}
-				datacenter_send_sock_fd = status;
-				//connect to datacenter
-				status = connect(datacenter_send_sock_fd, (struct sockaddr*)&datacenter_send_addr, datacenter_send_addr_len);
-				if(status < 0)
-				{
-					fprintf(stdout, "%sdatacenter_send skipping datacenter %d since it's not online\n", log_m, i+1);
-					continue;
-				}
-				goto RETRY_ID_SEND;
-			}
-			else if(status != msg_buf_max)
-			{
-				fprintf(stderr, "%sdatacenter_send encoutnered an issue while sending request (status: %d/errno: %d)\n", 
-					err_m, status, strerror(errno));
-				thread_rets->ret = 1;
-				break;
-			}
-
-			//send the datacenter the clock
-			RETRY_CLOCK_SEND:
-			sprintf(msg_buf, "%d", l_clock);
-			delay(msg_delay);
-			status = send(datacenter_send_sock_fd, msg_buf, msg_buf_max, 0);
-			if(status == -1 && errno == 104)
-			{
-				//close the socket connection to the datacenter and try again
-				fprintf(stdout, "%sdatacenter_send was interrupted while sending clock, retrying...\n", log_m);
-				status = close(datacenter_send_sock_fd);
-				if(status < 0)
-				{
-					fprintf(stderr, "%sdatacenter_send failed to cleanly close the socket (status: %d/errno: %d)\n", 
-						err_m, status, strerror(errno));
-					thread_rets->ret = 1;
-					break;
-				}
-				//open a datacenter_send socket
-				status = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-				if(status < 0)
-				{
-					fprintf(stderr, "%sdatacenter_send failed to open a socket (status: %d/errno: %d)\n", err_m, status, strerror(errno));
-					thread_rets->ret = 1;
-					break;
-				}
-				datacenter_send_sock_fd = status;
-				//connect to datacenter
-				status = connect(datacenter_send_sock_fd, (struct sockaddr*)&datacenter_send_addr, datacenter_send_addr_len);
-				if(status < 0)
-				{
-					fprintf(stdout, "%sdatacenter_send skipping datacenter %d since it's not online\n", log_m, i+1);
-					continue;
-				}
-				goto RETRY_CLOCK_SEND;
-			}
-			else if(status != msg_buf_max)
-			{
-				fprintf(stderr, "%sdatacenter_send encoutnered an issue while sending request (status: %d/errno: %d)\n", 
-					err_m, status, strerror(errno));
-				thread_rets->ret = 1;
-				break;
-			}
-	
-			//wait to receive a response from the datacenter
-			RETRY_ID_RECV:
-			status = recv(datacenter_send_sock_fd, msg_buf, msg_buf_max, 0);
-			if(status == -1 && errno == 104)
-			{
-				//close the socket connection to the datacenter and try again
-				fprintf(stdout, "%sdatacenter_send was interrupted while receving id, retrying...\n", log_m);
-				status = close(datacenter_send_sock_fd);
-				if(status < 0)
-				{
-					fprintf(stderr, "%sdatacenter_send failed to cleanly close the socket (status: %d/errno: %d)\n", 
-						err_m, status, strerror(errno));
-					thread_rets->ret = 1;
-					break;
-				}
-				//open a datacenter_send socket
-				status = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-				if(status < 0)
-				{
-					fprintf(stderr, "%sdatacenter_send failed to open a socket (status: %d/errno: %d)\n", err_m, status, strerror(errno));
-					thread_rets->ret = 1;
-					break;
-				}
-				datacenter_send_sock_fd = status;
-				//connect to datacenter
-				status = connect(datacenter_send_sock_fd, (struct sockaddr*)&datacenter_send_addr, datacenter_send_addr_len);
-				if(status < 0)
-				{
-					fprintf(stdout, "%sdatacenter_send skipping datacenter %d since it's not online\n", log_m, i+1);
-					continue;
-				}
-				goto RETRY_ID_RECV;
-			}
-			else if(status != msg_buf_max)
-			{
-				fprintf(stderr, "%sdatacenter_send encountered an issue while reading the response (status: %d/errno: %d)\n", 
-					err_m, status, strerror(errno));
-				thread_rets->ret = 1;
-				break;
-			}
-
-			//convert response to an int
-			errno = 0;
-			id_queue_res[i] = strtol(msg_buf, &end, 10);
-			if(*end != 0 || errno != 0)
-			{
-				fprintf(stderr, "%sdatacenter_send encountered an error while converting response id (errno: %s)", 
-					err_m, strerror(errno));
-				thread_rets->ret = 1;
-				break;
-			}
-
-			//wait to receive a response from the datacenter
-			RETRY_CLOCK_RECV:
-			status = recv(datacenter_send_sock_fd, msg_buf, msg_buf_max, 0);
-			if(status == -1 && errno == 104)
-			{
-				//close the socket connection to the datacenter and try again
-				fprintf(stdout, "%sdatacenter_send was interrupted while receiving clock, retrying...\n", log_m);
-				status = close(datacenter_send_sock_fd);
-				if(status < 0)
-				{
-					fprintf(stderr, "%sdatacenter_send failed to cleanly close the socket (status: %d/errno: %d)\n", 
-						err_m, status, strerror(errno));
-					thread_rets->ret = 1;
-					break;
-				}
-				//open a datacenter_send socket
-				status = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-				if(status < 0)
-				{
-					fprintf(stderr, "%sdatacenter_send failed to open a socket (status: %d/errno: %d)\n", err_m, status, strerror(errno));
-					thread_rets->ret = 1;
-					break;
-				}
-				datacenter_send_sock_fd = status;
-				//connect to datacenter
-				status = connect(datacenter_send_sock_fd, (struct sockaddr*)&datacenter_send_addr, datacenter_send_addr_len);
-				if(status < 0)
-				{
-					fprintf(stdout, "%sdatacenter_send skipping datacenter %d since it's not online\n", log_m, i+1);
-					continue;
-				}
-				goto RETRY_CLOCK_RECV;
-			}
-			else if(status != msg_buf_max)
-			{
-				fprintf(stderr, "%sdatacenter_send encountered an issue while reading the response (status: %d/errno: %d)\n", 
-					err_m, status, strerror(errno));
-				thread_rets->ret = 1;
-				break;
-			}
-
-			//convert response to an int
-			errno = 0;
-			clock_queue_res[i] = strtol(msg_buf, &end, 10);
-			if(*end != 0 || errno != 0)
-			{
-				fprintf(stderr, "%sdatacenter_send encountered an error while converting response clock (errno: %s)", 
-					err_m, strerror(errno));
-				thread_rets->ret = 1;
-				break;
-			}
-
-			//close the socket connection to the datacenter
-			status = close(datacenter_send_sock_fd);
-			if(status < 0)
-			{
-				fprintf(stderr, "%sdatacenter_send failed to cleanly close the socket (status: %d/errno: %d)\n", 
-					err_m, status, strerror(errno));
-				thread_rets->ret = 1;
-				break;
-			}
-
-			if(clock_queue_res[i] > clock_queue_min)
-			{
-				clock_queue_min = clock_queue_res[i];
-				id_queue_min = id_queue_res[i];
-			}
-		}
-		if(thread_rets->ret == 1)
-		{
-			break;
-		}
-		//increment clock from the request
-		if(retransmit == 0)
-		{
-			if(clock_queue_min > l_clock)
-				l_clock = clock_queue_min + 1;
-			else
-				l_clock += 1;
-		}
-
-		//check if our process claimed priority over the pool
-		fprintf(stdout, "%sdatacenter_send has clock: %d/id: %d, queue_response has clock: %d/id: %d\n", 
-			log_m, l_clock, id, clock_queue_min, id_queue_min);
-		if(id_queue_min == id)
-		{
-			claimed_sig = 1;
-		}
-		else
-		{
-			//retransmit the request
-			fprintf(stdout, "%sdatacenter_send waiting for hold claim on queue, retransmitting...\n", log_m);
-			retransmit = 1;
-			memset(clock_queue_res, 0, sizeof(clock_queue_res));
-			memset(id_queue_res, 0, sizeof(id_queue_res));
-			goto RETRANSMIT;
-		}
-
-		thread_rets->ret = 0;
-		while(claimed_sig == 0);
-		retransmit = 0;
-		fprintf(stdout, "%sdatacenter_send claimed_sig has been triggered\n", log_m);
-
-		for(i = 0; i < count; i++)
-		{
-			//skip yourself
-			if(id == i+1)
-			{
-				continue;
-			}
-			fprintf(stdout, "%sdatacenter_send sending release message to datacenter #%d\n", log_m, i+1);
-
-			comm_flag = 1;
-			datacenter_send_addr_len = sizeof(datacenter_send_addr);
-			memset((char *)&datacenter_send_addr, 0, datacenter_send_addr_len);
-			datacenter_send_addr.sin_family = AF_INET;
-			datacenter_send_addr.sin_addr.s_addr = inet_addr(datacenters[i].hostname);
-			datacenter_send_addr.sin_port = htons(port);
-
-			//open a datacenter_send socket
-			status = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-			if(status < 0)
-			{
-				fprintf(stderr, "%sdatacenter_send failed to open a socket (status: %d/errno: %d)\n", err_m, status, strerror(errno));
-				thread_rets->ret = 1;
-				break;
-			}
-			datacenter_send_sock_fd = status;
-
-			//connect to datacenter
-			status = connect(datacenter_send_sock_fd, (struct sockaddr*)&datacenter_send_addr, datacenter_send_addr_len);
-			if(status < 0)
-			{
-				fprintf(stdout, "%sdatacenter_send skipping datacenter %d since it's not online\n", log_m, i+1);
-				continue;
-			}
-
-			//send the datacenter the process id
-			RETRY_COMMB_SEND:
-			sprintf(msg_buf, "%d", comm_flag);
-			delay(msg_delay);
-			status = send(datacenter_send_sock_fd, msg_buf, msg_buf_max, 0);
-			if(status == -1 && errno == 104)
-			{
-				//close the socket connection to the datacenter and try again
-				fprintf(stdout, "%sdatacenter_send was interrupted while sending commb, retrying...\n", log_m);
-				status = close(datacenter_send_sock_fd);
-				if(status < 0)
-				{
-					fprintf(stderr, "%sdatacenter_send failed to cleanly close the socket (status: %d/errno: %d)\n", 
-						err_m, status, strerror(errno));
-					thread_rets->ret = 1;
-					break;
-				}
-				//open a datacenter_send socket
-				status = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-				if(status < 0)
-				{
-					fprintf(stderr, "%sdatacenter_send failed to open a socket (status: %d/errno: %d)\n", err_m, status, strerror(errno));
-					thread_rets->ret = 1;
-					break;
-				}
-				datacenter_send_sock_fd = status;
-				//connect to datacenter
-				status = connect(datacenter_send_sock_fd, (struct sockaddr*)&datacenter_send_addr, datacenter_send_addr_len);
-				if(status < 0)
-				{
-					fprintf(stdout, "%sdatacenter_send skipping datacenter %d since it's not online\n", log_m, i+1);
-					continue;
-				}
-				goto RETRY_COMMB_SEND;
-			}
-			else if(status != msg_buf_max)
-			{
-				fprintf(stderr, "%sdatacenter_send encoutnered an issue while sending request (status: %d/errno: %d)\n", 
-					err_m, status, strerror(errno));
-				thread_rets->ret = 1;
-				break;
-			}
-	
-			//send the datacenter the amount that was sold
-			RETRY_TICKETR_SEND:
-			sprintf(msg_buf, "%d", *requested);
-			delay(msg_delay);
-			status = send(datacenter_send_sock_fd, msg_buf, msg_buf_max, 0);
-			if(status == -1 && errno == 104)
-			{
-				//close the socket connection to the datacenter and try again
-				fprintf(stdout, "%sdatacenter_send was interrupted while sending requested amount for release, retrying...\n", 
-					log_m);
-				status = close(datacenter_send_sock_fd);
-				if(status < 0)
-				{
-					fprintf(stderr, "%sdatacenter_send failed to cleanly close the socket (status: %d/errno: %d)\n", 
-						err_m, status, strerror(errno));
-					thread_rets->ret = 1;
-					break;
-				}
-				//open a datacenter_send socket
-				status = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-				if(status < 0)
-				{
-					fprintf(stderr, "%sdatacenter_send failed to open a socket (status: %d/errno: %d)\n", err_m, status, strerror(errno));
-					thread_rets->ret = 1;
-					break;
-				}
-				datacenter_send_sock_fd = status;
-				//connect to datacenter
-				status = connect(datacenter_send_sock_fd, (struct sockaddr*)&datacenter_send_addr, datacenter_send_addr_len);
-				if(status < 0)
-				{
-					fprintf(stdout, "%sdatacenter_send skipping datacenter %d since it's not online\n", log_m, i+1);
-					continue;
-				}
-				goto RETRY_TICKETR_SEND;
-			}
-			else if(status != msg_buf_max)
-			{
-				fprintf(stderr, "%sdatacenter_send encoutnered an issue while sending request (status: %d/errno: %d)\n", 
-					err_m, status, strerror(errno));
-				thread_rets->ret = 1;
-				break;
-			}
-
-			//close the socket connection to the datacenter
-			status = close(datacenter_send_sock_fd);
-			if(status < 0)
-			{
-				fprintf(stderr, "%sdatacenter_send failed to cleanly close the socket (status: %d/errno: %d)\n", 
-					err_m, status, strerror(errno));
-				thread_rets->ret = 1;
-				break;
-			}
-
-			l_clock += 1;
-		}
-		release_sig = 1;
-		if(thread_rets->ret == 1)
-		{
-			break;
-		}
-		claimed_sig = 0;
-
-		thread_rets->ret = 0;
-	}
-
-	fflush_out_err();
-	return((void *)thread_rets);
 }

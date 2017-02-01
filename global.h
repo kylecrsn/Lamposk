@@ -21,14 +21,21 @@
 #include <pthread.h>
 #include <libconfig.h>
 
+/*macros*/
+#define ONLINE 0
+#define OFFLINE 1
+#define REQUEST 2
+#define RELEASE 3
+#define ACK 4
+
 /*structs*/
-typedef struct packet
+typedef struct packet_t
 {
-	uint8_t flag;
+	uint32_t type;
 	uint32_t id;
 	uint32_t clk;
 	uint32_t pool;
-}__attribute__((packed)) packet;
+}__attribute__((packed)) packet_t;
 typedef struct req_queue_t
 {
 	packet **packets;
@@ -37,6 +44,11 @@ typedef struct req_queue_t
 	int32_t tail;
 	pthread_mutex_t lock;
 }req_queue_t;
+typedef struct pool_t
+{
+	int32_t pool;
+	pthread_mutex_t lock;
+}pool_t;
 typedef struct clk_t
 {
 	int32_t clk;
@@ -47,15 +59,17 @@ typedef struct dc_t
 	int32_t id;
 	int32_t online;
 	char *hostname;
+	pthread_mutex_t lock;
 }dc_t;
 typedef struct cl_lstn_arg_t
 {
+	int32_t count;
 	int32_t port;
 }cl_lstn_arg_t;
 typedef struct dc_bcst_arg_t
 {
-	int32_t count;
-	int32_t port;
+	int32_t dest_id;
+	int32_t port_base;
 }dc_bcst_arg_t;
 typedef struct ret_t
 {
