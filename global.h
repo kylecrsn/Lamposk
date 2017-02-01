@@ -24,28 +24,43 @@
 /*structs*/
 typedef struct packet
 {
-	uint8_t instr;
-	uint32_t p_id;
-	uint32_t p_clk;
-	uint32_t t_amt;
+	uint8_t flag;
+	uint32_t id;
+	uint32_t clk;
+	uint32_t pool;
 }__attribute__((packed)) packet;
-typedef struct dc_obj
+typedef struct req_queue_t
+{
+	packet **packets;
+	int32_t size;
+	int32_t head;
+	int32_t tail;
+	pthread_mutex_t lock;
+}req_queue_t;
+typedef struct clk_t
+{
+	int32_t clk;
+	pthread_mutex_t lock;
+}clk_t;
+typedef struct dc_t
 {
 	int32_t id;
-	int32_t clk;
 	int32_t online;
 	char *hostname;
-}dc_obj;
-typedef struct arg_struct
+}dc_t;
+typedef struct cl_lstn_arg_t
 {
-	int32_t id;
 	int32_t port;
-	char *hostname;
-}arg_obj;
-typedef struct ret_struct
+}cl_lstn_arg_t;
+typedef struct dc_bcst_arg_t
+{
+	int32_t count;
+	int32_t port;
+}dc_bcst_arg_t;
+typedef struct ret_t
 {
 	int32_t ret;
-}ret_obj;
+}ret_t;
 
 /*functions*/
 void global_init();

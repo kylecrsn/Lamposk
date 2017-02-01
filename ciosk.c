@@ -62,12 +62,12 @@ int main (int argc, char *argv[])
 	//datacenter
 	if(d_flag)
 	{
-		ret = datacenter_handler();
+		ret = dc_handler();
 	}
 	//client
 	else
 	{
-		ret = client_handler();
+		ret = cl_handler();
 	}
 
 	return ret;

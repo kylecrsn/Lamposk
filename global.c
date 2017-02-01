@@ -14,6 +14,12 @@ void terminate_handler(int32_t x)
 	fprintf("[DATACENTER SHUTTING DOWN]\n");
 }
 
+void fflush_out_err()
+{
+	fflush(stdout);
+	fflush(stderr);
+}
+
 void delay(uint32_t seconds)
 {
 	uint32_t delay_time = time(0) + seconds;
