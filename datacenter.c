@@ -1,74 +1,35 @@
 #include "datacenter.h"
 
-int datacenter_handler()
+int dc_handler()
 {
-/*	request_sig = 0;
-	claimed_sig = 0;
-	release_sig = 0;
-	terminate_sig = 0;
-	l_clock = 1;
-	int status = 0;
-	int tickets_requested = 0;
-	int i;
-	int ticket_pool;
-	int datacenter_count;
-	int datacenter_addr_running;
-	int datcenter_addr_id;
-	int client_recv_port;
-	int datacenter_recv_port;*/
-/*	int client_recv_ret_val;
-	int datacenter_recv_ret_val;
-	int datacenter_send_ret_val;*/
-	// const char *hostname;
-/*	config_setting_t *datacenter_addr_settings;
-	config_setting_t *datacenter_addr_elem_setting;
-	config_setting_t *datacenter_addr_running_setting;
-	datacenter_obj datacenter;
-	datacenter_obj *datacenters;*/
-
-/*	ret_obj *client_recv_rets;
-	ret_obj *datacenter_recv_rets;
-	ret_obj *datacenter_send_rets;*/
-
-
-	/*
-		REVISED VARIABLES
-	*/
-	char *fnc_m = "datacenter_handler";
-	const char *hn;
 	int32_t init_this_dc = 0;
 	int32_t i;
 	int32_t status;
+	int32_t fd;
 	int32_t dc_addr_count;
 	int32_t dc_addr_id;
 	int32_t ticket_pool_init;
 	int32_t msg_delay;
 	int32_t cl_lstn_port;
 	int32_t dc_lstn_port_base;
+	char *fnc_m = "dc_handler";
+	const char *hostname;
+	char stdin_buf[256];
+	time_t boot_time;
+	struct flock *fl;
 	config_t cf_local;
 	config_t *cf;
-	struct flock *fl;
-	int32_t fd;
-	time_t boot_time;
-	char stdin_buf[256];
 	config_setting_t *dc_addr_settings;
 	config_setting_t *dc_addr_elem_setting;
 	pthread_t cl_lstn_thread_id;
-	pthread_t *dc_bcst_thread_id;
+	pthread_t *dc_bcst_thread_ids;
 	// pthread_t dc_lstn_thread_id;
-
-
 	cl_lstn_arg_t *cl_lstn_args;
 	dc_bcst_arg_t *dc_bcst_args;
 	// arg_t *dc_lstn_args;
-
-	ret_t *cl_lstn_rets;
+	//ret_t *cl_lstn_rets;
 	ret_t *dc_bcst_rets;
 
-
-	/*
-		REVISED CODE
-	*/
 	dc_init();
 
 	//open and lock the config file
@@ -97,22 +58,22 @@ int datacenter_handler()
 	//get general config values
 	config_lookup_int(cf, "delay", &msg_delay);
 	config_lookup_int(cf, "dc.ticket_pool_init", &ticket_pool_init);
-	config_lookup_int(cf, "dc.ticket_pool", &ticket_pool);
+	config_lookup_int(cf, "dc.ticket_pool", &(ticket_pool.pool));
 	config_lookup_int(cf, "dc.cl_lstn_port", &cl_lstn_port);
 	config_lookup_int(cf, "dc.dc_lstn_port_base", &dc_lstn_port_base);
 	dc_addr_settings = config_lookup(cf, "dc.addrs");
 	dc_addr_count = config_setting_length(dc_addr_settings);
 
 	//populate an array with all of the datacenter configs
-	dc_sys = (dc_sys_t *)malloc(dc_addr_count * sizeof(dc_sys_t));
+	dc_sys = (dc_t *)malloc(dc_addr_count*sizeof(dc_t));
 	for(i = 0; i < dc_addr_count; i++)
 	{
 		dc_addr_elem_setting = config_setting_get_elem(dc_addr_settings, i);
 		config_setting_lookup_int(dc_addr_elem_setting, "id", &(dc_sys[i].id));
 		config_setting_lookup_int(dc_addr_elem_setting, "online", &(dc_sys[i].online));
-		config_setting_lookup_string(dc_addr_elem_setting, "hostname", &hn);
-		dc_sys[i].hostname = (char *)malloc(strlen(hn) + 1);
-		memcpy(dc_sys[i].hostname, hn, strlen(hn) + 1);
+		config_setting_lookup_string(dc_addr_elem_setting, "hostname", &hostname);
+		dc_sys[i].hostname = (char *)malloc(strlen(hostname) + 1);
+		memcpy(dc_sys[i].hostname, hostname, strlen(hostname) + 1);
 		pthread_mutex_init(&(dc_sys[i].lock), NULL);
 
 		//set the index for the first availble datacenter not currently online
@@ -148,19 +109,36 @@ int datacenter_handler()
 	fprintf(stdout, "========================\n|   Datacenter #%d Log   |\n========================\n\n", this_dc.id);
 	fprintf(stdout, "- Boot Time: %s\n", asctime(localtime(&boot_time)));
 	fprintf(stdout, "- ID: %d\n", this_dc.id);
-	fprintf(stdout, "- Initial Clock: %d\n", this_dc.clk);
+	fprintf(stdout, "- Initial Clock: %d\n", this_clk.clk);
 	fprintf(stdout, "- Initial Ticket Pool: %d\n", ticket_pool_init);
-	fprintf(stdout, "- Current Ticket Pool: %d\n", ticket_pool);
+	fprintf(stdout, "- Current Ticket Pool: %d\n", ticket_pool.pool);
 	fprintf(stdout, "- Client Listen Port: %d\n", cl_lstn_port);
 	fprintf(stdout, "- Datacenter Broadcast Base Port: %d\n",dc_lstn_port_base);
 	fprintf(stdout, "- Datacenter Hostname: %s\n\n\n", this_dc.hostname);
 
-	//SPAWN DC SERVER
+	/*	//spawn datacenter_recv thread
+		datacenter_recv_args = (arg_t *)malloc(sizeof(struct arg_struct));
+		datacenter_recv_args->id = datacenter.id;
+		datacenter_recv_args->pool = &ticket_pool;
+		datacenter_recv_args->requested = &tickets_requested;
+		datacenter_recv_args->delay = msg_delay;
+		datacenter_recv_args->count = datacenter_count;
+		datacenter_recv_args->port = datacenter_recv_port;
+		datacenter_recv_args->hostname = datacenter.hostname;
+		fflush_out_err();
+		status = pthread_create(&datacenter_recv_thread_id, NULL, datacenter_recv_thread, (void *)datacenter_recv_args);
+		if(status != 0)
+		{
+			fprintf(stderr, "%sdatacenter %d failed to spawn datacenter_recv thread (status: %d/errno: %d)\n", 
+				err_m, datacenter.id, status, strerror(errno));
+			return 1;
+		}
+	*/
 
 	//wait for user input to connect to other datacenters
-	fprintf(stdout, "Please press the Enter key to connect to all other online datacenters.\n>>>", );
+	fprintf(stdout, "Please press the Enter key to connect to all other online datacenters.\n>>>");
 	fgets(stdin_buf, sizeof(stdin_buf), stdin);
-	fprintf(stdout, "\nNow connecting...\n", );
+	fprintf(stdout, "\nNow connecting...\n");
 
 	//create threads for broadcasting online/request/release packets
 	dc_bcst_thread_ids = (pthread_t *)malloc((dc_addr_count)*sizeof(pthread_t));
@@ -203,8 +181,7 @@ int datacenter_handler()
 	}
 
 	//spawn cl_lstn_thread
-	cl_lstn_args = (arg_t *)malloc(sizeof(arg_t));
-	cl_lstn_args->count = dc_addr_count;
+	cl_lstn_args = (cl_lstn_arg_t *)malloc(sizeof(cl_lstn_arg_t));
 	cl_lstn_args->port = cl_lstn_port;
 	fflush_out_err();
 	status = pthread_create(&cl_lstn_thread_id, NULL, cl_lstn_thread, (void *)cl_lstn_args);
@@ -213,37 +190,7 @@ int datacenter_handler()
 		return dc_log(stderr, "%s%d%s (%s) failed to spawn cl_lstn_thread (errno: %s)\n", err_m, fnc_m, 1);
 	}
 
-/*	//spawn datacenter_recv thread
-	datacenter_recv_args = (arg_t *)malloc(sizeof(struct arg_struct));
-	datacenter_recv_args->id = datacenter.id;
-	datacenter_recv_args->pool = &ticket_pool;
-	datacenter_recv_args->requested = &tickets_requested;
-	datacenter_recv_args->delay = msg_delay;
-	datacenter_recv_args->count = datacenter_count;
-	datacenter_recv_args->port = datacenter_recv_port;
-	datacenter_recv_args->hostname = datacenter.hostname;
-	fflush_out_err();
-	status = pthread_create(&datacenter_recv_thread_id, NULL, datacenter_recv_thread, (void *)datacenter_recv_args);
-	if(status != 0)
-	{
-		fprintf(stderr, "%sdatacenter %d failed to spawn datacenter_recv thread (status: %d/errno: %d)\n", 
-			err_m, datacenter.id, status, strerror(errno));
-		return 1;
-	}
-*/
-	//spawn datacenter_send thread
-	dc_bcst_args = (arg_t *)malloc(sizeof(struct arg_struct));
-	dc_bcst_args->count = dc_addr_count;
-	dc_bcst_args->port = dc_lstn_port_base;
-	fflush_out_err();
-	status = pthread_create(&dc_bcst_thread_id, NULL, dc_bcst_thread, (void *)dc_bcst_args);
-	if(status != 0)
-	{
-		return dc_log(stderr, "%sdatacenter %d failed to spawn datacenter_send thread (status: %d/errno: %d)\n", err_m, fnc_m, 1);
-	}
-
 	dc_log(stdout, "%s%d%s (%s) finished spawning primary child threads\n", log_m, fnc_m, 0);
-
 
 	//JOIN THREADS
 
@@ -253,11 +200,10 @@ int datacenter_handler()
 		fflush_out_err();
 		status = pthread_join(dc_bcst_thread_ids[i], (void **)&dc_bcst_rets);
 		fflush_out_err();
-		ret += dc_bcst_rets->ret;
+		//ret += dc_bcst_rets->ret;
 		free(dc_bcst_rets);
 	}
 	free(dc_bcst_thread_ids);
-
 
 	dc_log(stdout, "%s%d%s (%s) finished joining primary child threads\n", log_m, fnc_m, 0);
 
@@ -324,9 +270,9 @@ void dc_init()
 	dc_sys_online = 0;
 }
 
-int32_t dc_log(FILE *std_strm, char *msg, char *opn_m char *fnc_m, int32_t errrno_f)
+int32_t dc_log(FILE *std_strm, char *msg, char *opn_m, char *fnc_m, int32_t errno_f)
 {
-	pthread_mutex_lock(this_clk.clk);
+	pthread_mutex_lock(&(this_clk.lock));
 	if(errno_f)
 	{
 		fprintf(std_strm, msg, opn_m, this_clk.clk, cls_m, fnc_m, strerror(errno));
@@ -335,34 +281,36 @@ int32_t dc_log(FILE *std_strm, char *msg, char *opn_m char *fnc_m, int32_t errrn
 	{
 		fprintf(std_strm, msg, opn_m, this_clk.clk, cls_m, fnc_m);
 	}
-	pthread_mutex_unlock(this_clk.clk);
+	pthread_mutex_unlock(&(this_clk.lock));
 	fflush_out_err();
 	return 1;
 }
 
-uint8_t *packet_stream encode_packet(int32_t p_type, int32_t p_id, int32_t p_clk, int32_t p_pool)
+packet_t *encode_packet(int32_t p_type, int32_t p_id, int32_t p_clk, int32_t p_pool)
 {
-	packet_t packet;
-	uint8_t *packet_stream = (uint8_t *)malloc(sizeof(packet));
+/*	packet_t packet;
+	uint8_t *packet_stream = (uint8_t *)malloc(sizeof(packet));*/
+	packet_t *packet = (packet_t *)malloc(sizeof(packet));
 
-	packet.type = hton32((uint32_t)p_type);
-	packet.id = hton32((uint32_t)p_id);
-	packet.clk = hton32((uint32_t)p_clk);
-	packet.pool = hton32((uint32_t)p_pool);
+	packet->type = htonl((uint32_t)p_type);
+	packet->id = htonl((uint32_t)p_id);
+	packet->clk = htonl((uint32_t)p_clk);
+	packet->pool = htonl((uint32_t)p_pool);
 
-	packet_stream = (uint8_t *)packet;
-	return packet_stream;
+	return packet;
+/*	packet_stream = (uint8_t *)packet;
+	return packet_stream;*/
 }
 
-packet_t *packet decode_packet(uint8_t *packet_stream)
+packet_t *decode_packet(uint8_t *packet_stream)
 {
 	packet_t *packet = (packet_t *)malloc(sizeof(packet));
 
 	packet = (packet_t *)packet_stream;
-	packet->type = ntoh32(packet->type);
-	packet->id = ntoh32(packet->id);
-	packet->clk = ntoh32(packet->clk);
-	packet->pool = ntoh32(packet->pool);
+	packet->type = ntohl(packet->type);
+	packet->id = ntohl(packet->id);
+	packet->clk = ntohl(packet->clk);
+	packet->pool = ntohl(packet->pool);
 
 	return packet;
 }
@@ -372,25 +320,24 @@ void *cl_lstn_thread(void *args)
 {
 	int32_t msg_buf_max = 4096;
 	int32_t sockopt = 1;
+	int32_t i;
 	int32_t status;
 	int32_t cl_lstn_sock_fd;
 	int32_t cl_rspd_sock_fd;
-	int32_t count;
 	int32_t port;
 	int32_t ticket_amount;
-	char msg_buf[msg_buf_max];
 	char *fnc_m = "cl_lstn_thread";
 	char *end;
+	char msg_buf[msg_buf_max];
 	struct sockaddr_in cl_lstn_addr;
 	struct sockaddr_in cl_rspd_addr;
 	socklen_t cl_lstn_addr_len;
 	socklen_t cl_rspd_addr_len;
 	cl_lstn_arg_t *thread_args = (cl_lstn_arg_t *)args;
-	ret_t *thread_rets = (ret_t *)malloc(sizeof(ret_obj));
+	ret_t *thread_rets = (ret_t *)malloc(sizeof(ret_t));
 
 	//read out data packed in the args parameter
 	fflush_out_err();
-	count = thread_args->count;
 	port = thread_args->port;
 	free(thread_args);
 	thread_rets->ret = 0;
@@ -399,7 +346,7 @@ void *cl_lstn_thread(void *args)
 	cl_lstn_addr_len = sizeof(cl_lstn_addr);
 	memset((char *)&cl_lstn_addr, 0, cl_lstn_addr_len);
 	cl_lstn_addr.sin_family = AF_INET;
-	cl_lstn_addr.sin_addr.s_addr = inet_addr(hostname);
+	cl_lstn_addr.sin_addr.s_addr = inet_addr(this_dc.hostname);
 	cl_lstn_addr.sin_port = htons(port);
 
 	//open a server socket in the datacenter to accept incoming client requests
@@ -451,7 +398,7 @@ void *cl_lstn_thread(void *args)
 		pthread_mutex_unlock(&(ticket_pool.lock));
 
 		//accept connection from client
-		status = accept(cl_lstn_sock_fd, (struct sockaddr *)&cl_rspd_addr, &ccl_rspd_addr_len);
+		status = accept(cl_lstn_sock_fd, (struct sockaddr *)&cl_rspd_addr, &cl_rspd_addr_len);
 		if(status < 0)
 		{
 			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) failed to accept a connection from a client (errno: %s)\n", err_m, fnc_m, 1);
@@ -494,24 +441,24 @@ void *cl_lstn_thread(void *args)
 		memset(msg_buf, 0, msg_buf_max);
 		if(ticket_amount > ticket_pool.pool)
 		{
-			strcpy(msg_buf, "0");
-			fprintf(stdout, "%s%d%s (%s) rejected a request from a client for %d ", ticket_amount);
+			sprintf(msg_buf, "%d", 0);
+			fprintf(stdout, "%s%d%s (%s) rejected a request from a client for %d ", log_m, this_clk.clk, cls_m, fnc_m, ticket_amount);
 			print_tickets(ticket_amount);
 			fprintf(stdout, " (%d ", ticket_pool.pool);
-			print_tickets(ticket_pool);
+			print_tickets(ticket_pool.pool);
 			fprintf(stdout, " remaining in the pool)\n");
 		}
 		else
 		{
 			ticket_pool.pool -= ticket_amount;
-			strcpy(msg_buf, "1");
-			fprintf(stdout, "%s%d%s (%s) accepted a request from a client for %d ", ticket_amount);
+			sprintf(msg_buf, "%d", 1);
+			fprintf(stdout, "%s%d%s (%s) accepted a request from a client for %d ", log_m, this_clk.clk, cls_m, fnc_m, ticket_amount);
 			print_tickets(ticket_amount);
 			fprintf(stdout, " (%d ", ticket_pool.pool);
-			print_tickets(ticket_pool);
+			print_tickets(ticket_pool.pool);
 			fprintf(stdout, " remaining in the pool)\n");
 		}
-		thread_mutex_unlock(&this_clk.lock);
+		pthread_mutex_unlock(&this_clk.lock);
 		pthread_mutex_unlock(&(ticket_pool.lock));
 		dc_log(stdout, "%s%d%s (%s) request completed, allowing release of ticket pool control\n", log_m, fnc_m, 0);
 
@@ -867,19 +814,17 @@ void *datacenter_recv_thread(void *args)
 //send messages to all other datacenters for synchronization
 void *dc_bcst_thread(void *args)
 {
-	int32_t i;
 	int32_t status;
-	int32_t ret;
 	int32_t dest_id;
 	int32_t port_base;
 	int32_t dc_bcst_sock_fd;
+	uint8_t packet_stream[16];
 	char *fnc_m = "dc_bcst_thread";
-	uint8_t *packet_stream;
 	packet_t *packet;
 	struct sockaddr_in dc_bcst_addr;
 	socklen_t dc_bcst_addr_len;
-	dc_send_arg_t *dc_send_args;
-	ret_t *dc_send_rets;
+	dc_bcst_arg_t *thread_args = (dc_bcst_arg_t *)args;
+	ret_t *thread_rets = (ret_t *)malloc(sizeof(ret_t));
 	
 	//unpack args
 	fflush_out_err();
@@ -921,17 +866,17 @@ void *dc_bcst_thread(void *args)
 	//build a packet signaling this datacenter is now online
 	pthread_mutex_lock(&(ticket_pool.lock));
 	pthread_mutex_lock(&(this_clk.lock));
-	packet_stream = encode_packet(ONLINE, this_dc.id, this_clk.clk, ticket_pool.pool);
+	packet = encode_packet(ONLINE, this_dc.id, this_clk.clk, ticket_pool.pool);
 
 	//send the datacenter the online packet
-	status = send(dc_bcst_sock_fd, packet_stream, sizeof(packet_stream), 0);
-	if(status != sizeof(packet_stream))
+	status = send(dc_bcst_sock_fd, packet, sizeof(packet), 0);
+	if(status != sizeof(packet))
 	{
 		pthread_mutex_unlock(&(this_clk.lock));
 		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) encountered an issue while sending the online packet (errno: %s)\n", err_m, fnc_m, 1);
 		pthread_exit((void *)thread_rets);
 	}
-	free(packet_stream);
+	free(packet);
 
 	//receive the ack packet back from the server
 	status = recv(dc_bcst_sock_fd, packet_stream, sizeof(packet_stream), 0);
@@ -966,17 +911,17 @@ void *dc_bcst_thread(void *args)
 		//build a packet signaling this datacenter is requesting control of the ticket pool
 		pthread_mutex_lock(&(ticket_pool.lock));
 		pthread_mutex_lock(&(this_clk.lock));
-		packet_stream = encode_packet(REQUEST, this_dc.id, this_clk.clk, ticket_pool.pool);
+		packet = encode_packet(REQUEST, this_dc.id, this_clk.clk, ticket_pool.pool);
 
 		//send the datacenter the request packet
-		status = send(dc_bcst_sock_fd, packet_stream, sizeof(packet_stream), 0);
-		if(status != sizeof(packet_stream))
+		status = send(dc_bcst_sock_fd, packet, sizeof(packet), 0);
+		if(status != sizeof(packet))
 		{
 			pthread_mutex_unlock(&(this_clk.lock));
 			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) encountered an issue while sending the request packet (errno: %s)\n", err_m, fnc_m, 1);
 			pthread_exit((void *)thread_rets);
 		}
-		free(packet_stream);
+		free(packet);
 
 		//receive the ack packet back from the server
 		status = recv(dc_bcst_sock_fd, packet_stream, sizeof(packet_stream), 0);
@@ -1006,17 +951,17 @@ void *dc_bcst_thread(void *args)
 		//build a packet signaling this datacenter is releasing control of the ticket pool
 		pthread_mutex_lock(&(ticket_pool.lock));
 		pthread_mutex_lock(&(this_clk.lock));
-		packet_stream = encode_packet(RELEASE, this_dc.id, this_clk.clk, ticket_pool.pool);
+		packet = encode_packet(RELEASE, this_dc.id, this_clk.clk, ticket_pool.pool);
 
 		//send the datacenter the release packet
-		status = send(dc_bcst_sock_fd, packet_stream, sizeof(packet_stream), 0);
-		if(status != sizeof(packet_stream))
+		status = send(dc_bcst_sock_fd, packet, sizeof(packet), 0);
+		if(status != sizeof(packet))
 		{
 			pthread_mutex_unlock(&(this_clk.lock));
 			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) encountered an issue while sending the release packet (errno: %s)\n", err_m, fnc_m, 1);
 			pthread_exit((void *)thread_rets);
 		}
-		free(packet_stream);
+		free(packet);
 
 		//receive the ack packet back from the server
 		status = recv(dc_bcst_sock_fd, packet_stream, sizeof(packet_stream), 0);

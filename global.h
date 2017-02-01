@@ -38,7 +38,7 @@ typedef struct packet_t
 }__attribute__((packed)) packet_t;
 typedef struct req_queue_t
 {
-	packet **packets;
+	packet_t **packets;
 	int32_t size;
 	int32_t head;
 	int32_t tail;
@@ -63,7 +63,6 @@ typedef struct dc_t
 }dc_t;
 typedef struct cl_lstn_arg_t
 {
-	int32_t count;
 	int32_t port;
 }cl_lstn_arg_t;
 typedef struct dc_bcst_arg_t
@@ -79,6 +78,7 @@ typedef struct ret_t
 /*functions*/
 void global_init();
 void terminate_handler(int32_t x);
+void fflush_out_err();
 void delay(uint32_t seconds);
 struct flock *lock_cfg(int32_t fd);
 int8_t unlock_cfg(int32_t fd, struct flock *fl);

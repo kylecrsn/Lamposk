@@ -6,12 +6,12 @@ void global_init()
 	opterr = 0;
 	err_m = "[ERR|CLK:";
 	log_m = "[LOG|CLK:";
-	cls_m = "]:"
+	cls_m = "]:";
 }
 
 void terminate_handler(int32_t x)
 {
-	fprintf("[DATACENTER SHUTTING DOWN]\n");
+	fprintf(stdout, "[DATACENTER SHUTTING DOWN]\n");
 }
 
 void fflush_out_err()
@@ -28,12 +28,12 @@ void delay(uint32_t seconds)
 
 struct flock *lock_cfg(int32_t fd)
 {
-	struct flock *fl = (struct flock *fl)malloc(sizeof(struct flock));
-	*fl.l_type = F_WRLCK;
-	*fl.l_whence = SEEK_SET;
-	*fl.l_start = 0;
-	*fl.l_len = 0;
-	*fl.l_pid = getpid();
+	struct flock *fl = (struct flock *)malloc(sizeof(struct flock));
+	fl->l_type = F_WRLCK;
+	fl->l_whence = SEEK_SET;
+	fl->l_start = 0;
+	fl->l_len = 0;
+	fl->l_pid = getpid();
 
 	//lock the config file for writing
 	if(fcntl(fd, F_SETLKW, fl) < 0)
@@ -48,7 +48,7 @@ struct flock *lock_cfg(int32_t fd)
 
 int8_t unlock_cfg(int32_t fd, struct flock *fl)
 {
-	*fl.l_type = F_UNLCK;
+	fl->l_type = F_UNLCK;
 
 	//unlock the config file
 	if(fcntl(fd, F_SETLK, fl) < 0)
