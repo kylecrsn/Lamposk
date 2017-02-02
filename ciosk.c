@@ -6,7 +6,7 @@ int main (int argc, char *argv[])
 {
 	int8_t ret = 0;
 	int32_t c;
-	bool d_flag = false;
+	int32_t d_flag = 0;
 	char *usage = "invalid or missing options\nusage: ./ciosk [-d]";
 
 	global_init();
@@ -36,7 +36,7 @@ int main (int argc, char *argv[])
 		{
 			case 'd':
 			{
-				d_flag = true;
+				d_flag = 1;
 				break;
 			}
 			case '?':

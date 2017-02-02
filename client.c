@@ -83,7 +83,7 @@ int32_t cl_handler()
 	//handle if there are no datacenters open
 	if(dc_addr_online == 0)
 	{
-		fprintf(stdout, "There are currently no kiosks online, please try again later.\n");
+		fprintf(stdout, "There are currently no kiosks online, please try again later.\n\n");
 		return free_dc_sys(dc_sys, dc_addr_count);
 	}
 

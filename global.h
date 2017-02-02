@@ -61,15 +61,20 @@ typedef struct dc_t
 	char *hostname;
 	pthread_mutex_t lock;
 }dc_t;
+typedef struct dc_lstn_arg_t
+{
+	int32_t src_id;
+	int32_t port_base;
+}dc_lstn_arg_t;
+typedef struct dc_bcst_arg_t
+{
+	int32_t dst_id;
+	int32_t port_base;
+}dc_bcst_arg_t;
 typedef struct cl_lstn_arg_t
 {
 	int32_t port;
 }cl_lstn_arg_t;
-typedef struct dc_bcst_arg_t
-{
-	int32_t dest_id;
-	int32_t port_base;
-}dc_bcst_arg_t;
 typedef struct ret_t
 {
 	int32_t ret;
@@ -88,5 +93,6 @@ void print_tickets(uint32_t amnt);
 char *err_m;
 char *log_m;
 char *cls_m;
+volatile int32_t terminate_sig;
 
 #endif

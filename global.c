@@ -2,6 +2,7 @@
 
 void global_init()
 {
+	terminate_sig = 0;
 	signal(SIGINT, terminate_handler);
 	opterr = 0;
 	err_m = "[ERR|CLK:";
@@ -11,7 +12,8 @@ void global_init()
 
 void terminate_handler(int32_t x)
 {
-	fprintf(stdout, "[DATACENTER SHUTTING DOWN]\n");
+	fprintf(stdout, "\n[DATACENTER SHUTTING DOWN]\n");
+	exit(0);
 }
 
 void fflush_out_err()
