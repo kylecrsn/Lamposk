@@ -30,7 +30,7 @@ int32_t cl_handler()
 	dc_t *dc_sys;
 
 	//open and lock the config file
-	fd = open("global.cfg", O_RDWR);
+	fd = open(cfg_fn, O_RDWR);
 	fl = lock_cfg(fd);
 	if(fl == NULL)
 	{
@@ -40,7 +40,7 @@ int32_t cl_handler()
 	//initialize the config object
 	cf = &cf_local;
 	config_init(cf);
-	if(!config_read_file(cf, "global.cfg"))
+	if(!config_read_file(cf, cfg_fn))
 	{
 		fprintf(stderr, "%sn/a%s (%s) encountered an issue while reading from config file: %s:%d - %s\n", 
 			err_m, cls_m, fnc_m, config_error_file(cf), config_error_line(cf), config_error_text(cf));
@@ -169,7 +169,7 @@ int32_t cl_handler()
 		}
 	}
 
-	fprintf(stdout, "Your request is now being sent to Kiosk #%d.\n", i_dc);
+	fprintf(stdout, "Your request is now being sent to Kiosk #%d...\n", i_dc);
 
 	//setup the datacenter address object
 	dc_addr_len = sizeof(dc_addr);
@@ -230,8 +230,9 @@ int32_t cl_handler()
 				err_m, cls_m, fnc_m, status, strerror(errno));
 			return free_dc_sys(dc_sys, dc_addr_count);
 		}
+		break;
 	}
-	fprintf(stdout, "\n\nKiosk #%d has received your request, please wait for processing to complete.\n\n", i_dc);
+	fprintf(stdout, "\nKiosk #%d has received your request, please wait for processing to complete.\n\n", i_dc);
 
 	//wait to receive a response from the datacenter
 	memset(msg_buf, 0, msg_buf_max);

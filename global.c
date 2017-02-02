@@ -5,6 +5,7 @@ void global_init()
 	terminate_sig = 0;
 	signal(SIGINT, terminate_handler);
 	opterr = 0;
+	cfg_fn = "ciosk.cfg";
 	err_m = "[ERR|CLK:";
 	log_m = "[LOG|CLK:";
 	cls_m = "]:";

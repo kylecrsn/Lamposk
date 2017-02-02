@@ -36,12 +36,15 @@ typedef struct packet_t
 	uint32_t clk;
 	uint32_t pool;
 }__attribute__((packed)) packet_t;
+typedef struct lamport_t
+{
+	int32_t clk;
+	int32_t id;
+}lamport_t;
 typedef struct req_queue_t
 {
-	packet_t **packets;
+	lamport_t *requests;
 	int32_t size;
-	int32_t head;
-	int32_t tail;
 	pthread_mutex_t lock;
 }req_queue_t;
 typedef struct pool_t
@@ -90,6 +93,7 @@ int8_t unlock_cfg(int32_t fd, struct flock *fl);
 void print_tickets(uint32_t amnt);
 
 /*variables*/
+char *cfg_fn;
 char *err_m;
 char *log_m;
 char *cls_m;
