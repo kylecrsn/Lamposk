@@ -138,7 +138,7 @@ int32_t cl_handler()
 	}
 
 	//ask the user to specify the number of tickets they would like to buy
-	fprintf(stdout, "How many tickets would you like to buy?\n\n");
+	fprintf(stdout, "How many tickets would you like to buy?\n");
 	
 	while(1)
 	{
@@ -169,7 +169,7 @@ int32_t cl_handler()
 		}
 	}
 
-	fprintf(stdout, "Your request is now being sent to Kiosk #%d...\n", i_dc);
+	fprintf(stdout, "Your request is now being sent to Kiosk #%d.\n", i_dc);
 
 	//setup the datacenter address object
 	dc_addr_len = sizeof(dc_addr);
@@ -232,7 +232,7 @@ int32_t cl_handler()
 		}
 		break;
 	}
-	fprintf(stdout, "\nKiosk #%d has received your request, please wait for processing to complete.\n\n", i_dc);
+	fprintf(stdout, "Kiosk #%d has received your request, please wait for processing to complete...\n\n", i_dc);
 
 	//wait to receive a response from the datacenter
 	memset(msg_buf, 0, msg_buf_max);

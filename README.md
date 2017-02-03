@@ -1,7 +1,5 @@
 # Ciosk
-A C implementation of a distributed ticketing kiosk system inspired by Lamport's Bakery Algorithm
-
-NOTE: To shutdown the datacenters, use ctrl^c, then reset the "running flag" in the .cfg to 0 for any system that has it as 1
+A C implementation of a distributed ticketing kiosk system based on [Lamport's Timestamp Algoirthm](http://lamport.azurewebsites.net/pubs/time-clocks.pdf)
 
 ## About
 #### Assumptions
@@ -41,12 +39,3 @@ NOTE: To shutdown the datacenters, use ctrl^c, then reset the "running flag" in 
 ##### Notes
 - Each datacenter stores its own view of the unit count
 - maintian a logical lamport clock <clk, proc_id> for breaking ties
-
-/*
-	instr
-	0 == starting up (notify of online status)
-	1 == shutting down (notify of offline status)
-	2 == sending request for ticket pool access
-	3 == sending reply
-	4 == sending release for ticket pool access
-*/

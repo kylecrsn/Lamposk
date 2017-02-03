@@ -6,7 +6,7 @@
 
 /*functions*/
 int32_t dc_handler();
-int32_t dc_log(FILE *std_strm, char *msg, char *opn_m, int32_t clk_val, char *fnc_m, int32_t errrno_f);
+int32_t dc_log(FILE *std_strm, char *msg, char *opn_m, int32_t clk_val, char *fnc_m, int32_t dc_target, int32_t errrno_f);
 uint8_t *encode_packet(int32_t p_type, int32_t p_id, int32_t p_clk, int32_t p_pool);
 packet_t *decode_packet(uint8_t *packet_stream);
 int32_t max_clk(int32_t local_clk, int32_t recvd_clk);

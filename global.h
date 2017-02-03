@@ -11,7 +11,6 @@
 #include <stdbool.h>
 #include <inttypes.h>
 #include <getopt.h>
-#include <signal.h>
 #include <errno.h>
 #include <netdb.h>
 #include <sys/types.h>
@@ -85,7 +84,6 @@ typedef struct ret_t
 
 /*functions*/
 void global_init();
-void terminate_handler(int32_t x);
 void fflush_out_err();
 void delay(uint32_t seconds);
 struct flock *lock_cfg(int32_t fd);
@@ -97,6 +95,6 @@ char *cfg_fn;
 char *err_m;
 char *log_m;
 char *cls_m;
-volatile int32_t terminate_sig;
+volatile int32_t exit_sig;
 
 #endif
