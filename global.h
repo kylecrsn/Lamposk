@@ -95,6 +95,5 @@ char *cfg_fn;
 char *err_m;
 char *log_m;
 char *cls_m;
-volatile int32_t exit_sig;
 
 #endif

@@ -2,7 +2,6 @@
 
 void global_init()
 {
-	exit_sig = 0;
 	opterr = 0;
 	cfg_fn = "ciosk.cfg";
 	err_m = "[ERR|CLK:";
