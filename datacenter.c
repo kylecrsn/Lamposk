@@ -1151,6 +1151,7 @@ void *cl_lstn_thread(void *args)
 			pthread_mutex_unlock(&(rq.lock));
 		}
 
+
 		dc_log(stdout, "%s%d%s (%s) ticket pool control has been obtained, processing request\n", log_m, this_clk.clk, fnc_m, 0);
 
 		//set a flag indicating whether the request message was accepted

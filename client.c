@@ -153,7 +153,7 @@ int32_t cl_handler()
 			return free_dc_sys(dc_sys, dc_addr_count);
 		}
 
-		//validate input from stdin
+		//convert to an int
 		errno = 0;
 		ticket_count = strtol(stdin_buf, &end, 10);
 		if((*end != 0 && *end != 9 && *end != 10 && *end != 32) || errno != 0 || ticket_count < 0)

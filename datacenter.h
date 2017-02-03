@@ -19,6 +19,7 @@ void *dc_bcst_thread(void *args);
 /*variables*/
 int32_t msg_delay;
 int32_t dc_sys_online;
+int32_t quit_sig;
 req_queue_t rq;
 pool_t ticket_pool;
 clk_t this_clk;
@@ -28,5 +29,6 @@ pthread_mutex_t dc_lstn_lock;
 pthread_mutex_t dc_bcst_lock;
 pthread_mutex_t pool_lock;
 pthread_mutex_t bcst_lock;
+pthread_mutex_t quit_lock;
 
 #endif
