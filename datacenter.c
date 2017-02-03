@@ -209,6 +209,10 @@ int dc_handler()
 		{
 			dc_sys_online++;
 		}
+		else
+		{
+			pthread_cancel(dc_lstn_thread_ids[i]);
+		}
 		pthread_mutex_unlock(&(dc_sys[i].lock));
 	}
 
@@ -232,11 +236,16 @@ int dc_handler()
 		{
 			continue;
 		}
-		fflush_out_err();
-		status = pthread_join(dc_lstn_thread_ids[i], (void **)&dc_lstn_rets);
-		fflush_out_err();
-		//ret += dc_bcst_rets->ret;
-		free(dc_lstn_rets);
+		pthread_mutex_lock(&(dc_sys[i].lock));
+		if(dc_sys[i].online == 1)
+		{
+			pthread_mutex_unlock(&(dc_sys[i].lock));
+			fflush_out_err();
+			status = pthread_join(dc_lstn_thread_ids[i], (void **)&dc_lstn_rets);
+			fflush_out_err();
+			free(dc_lstn_rets);
+		}
+		pthread_mutex_unlock(&(dc_sys[i].lock));
 	}
 	free(dc_lstn_thread_ids);
 
@@ -251,7 +260,6 @@ int dc_handler()
 		fflush_out_err();
 		status = pthread_join(dc_bcst_thread_ids[i], (void **)&dc_bcst_rets);
 		fflush_out_err();
-		//ret += dc_bcst_rets->ret;
 		free(dc_bcst_rets);
 	}
 	free(dc_bcst_thread_ids);
@@ -1129,16 +1137,19 @@ void *cl_lstn_thread(void *args)
 		}
 
 		//make sure it is scheduled at the head of the queue
-		while(1)
+		if(dc_sys_online > 0)
 		{
-			pthread_mutex_lock(&(rq.lock));
-			if(rq.requests[0].id == this_dc.id)
+			while(1)
 			{
-				break;
+				pthread_mutex_lock(&(rq.lock));
+				if(rq.requests[0].id == this_dc.id)
+				{
+					break;
+				}
+				pthread_mutex_unlock(&(rq.lock));
 			}
 			pthread_mutex_unlock(&(rq.lock));
 		}
-		pthread_mutex_unlock(&(rq.lock));
 
 		dc_log(stdout, "%s%d%s (%s) ticket pool control has been obtained, processing request\n", log_m, this_clk.clk, fnc_m, 0);
 
