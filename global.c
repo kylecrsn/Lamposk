@@ -13,7 +13,7 @@ void global_init()
 
 void terminate_handler(int32_t x)
 {
-	fprintf(stdout, "\n[DATACENTER SHUTTING DOWN]\n");
+	fprintf(stdout, "\n[SHUTTING DOWN]\n");
 	exit(0);
 }
 
