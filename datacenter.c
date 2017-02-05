@@ -46,6 +46,7 @@ int dc_handler()
 	this_clk.clk = 0;
 	dc_sys_online = 0;
 	quit_sig = 0;
+	sync_clk = 0;
 
 	//open and lock the config file
 	fd = open(cfg_fn, O_RDWR);
@@ -500,50 +501,50 @@ void *dc_lstn_thread(void *args)
 	status = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	if(status < 0)
 	{
-		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: DC%d> failed to open a socket (errno: %s)\n", 
+		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: dc%d> failed to open a socket (errno: %s)\n", 
 			err_m, this_clk.clk, fnc_m, src_id, 1);
 		pthread_mutex_unlock(&dc_lstn_lock);
 		pthread_exit((void *)thread_rets);
 	}
 	dc_lstn_sock_fd = status;
-	dc_log(stdout, "%s%d%s (%s) <target: DC%d> finished initializing a socket for an incoming datacenter connection\n", 
+	dc_log(stdout, "%s%d%s (%s) <target: dc%d> finished initializing a socket for an incoming datacenter connection\n", 
 		log_m, this_clk.clk, fnc_m, src_id, 0);
 
 	//check if the system is still holding onto the port after a recent restart
 	status = setsockopt(dc_lstn_sock_fd, SOL_SOCKET, SO_REUSEADDR, (const void *)&sockopt, sizeof(int));
 	if(status < 0)
 	{
-		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: DC%d> can't bind to port due to a recent program restart (errno: %s)\n", 
+		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: dc%d> can't bind to port due to a recent program restart (errno: %s)\n", 
 			err_m, this_clk.clk, fnc_m, src_id, 1);
 		pthread_mutex_unlock(&dc_lstn_lock);
 		pthread_exit((void *)thread_rets);
 	}
-	dc_log(stdout, "%s%d%s (%s) <target: DC%d> finished setting the socket to be reusable\n", 
+	dc_log(stdout, "%s%d%s (%s) <target: dc%d> finished setting the socket to be reusable\n", 
 		log_m, this_clk.clk, fnc_m, src_id, 0);
 
 	//bind to a port on the datacenter
 	status = bind(dc_lstn_sock_fd, (struct sockaddr *)&dc_lstn_addr, dc_lstn_addr_len);
 	if(status < 0)
 	{
-		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: DC%d> failed to bind to the specified port (errno: %s)\n", 
+		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: dc%d> failed to bind to the specified port (errno: %s)\n", 
 			err_m, this_clk.clk, fnc_m, src_id, 1);
 		pthread_mutex_unlock(&dc_lstn_lock);
 		pthread_exit((void *)thread_rets);
 	}
-	dc_log(stdout, "%s%d%s (%s) <target: DC%d> finished binding to the socket\n", 
+	dc_log(stdout, "%s%d%s (%s) <target: dc%d> finished binding to the socket\n", 
 		log_m, this_clk.clk, fnc_m, src_id, 0);
 
 	//listen to the port for an incoming initial datacenter connection
 	status = listen(dc_lstn_sock_fd, 1);
 	if(status < 0)
 	{
-		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: DC%d> failed to listen to the port for a datacenter (errno: %s)\n", 
+		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: dc%d> failed to listen to the port for a datacenter (errno: %s)\n", 
 			err_m, this_clk.clk, fnc_m, src_id, 1);
 		pthread_mutex_unlock(&dc_lstn_lock);
 		pthread_exit((void *)thread_rets);
 	}
 	dc_rspd_addr_len = sizeof(dc_rspd_addr);
-	dc_log(stdout, "%s%d%s (%s) <target: DC%d> now listening for a datacenter connection\n", 
+	dc_log(stdout, "%s%d%s (%s) <target: dc%d> now listening for a datacenter connection\n", 
 		log_m, this_clk.clk, fnc_m, src_id, 0);
 	pthread_mutex_unlock(&dc_lstn_lock);
 
@@ -551,21 +552,21 @@ void *dc_lstn_thread(void *args)
 	status = accept(dc_lstn_sock_fd, (struct sockaddr *)&dc_rspd_addr, &dc_rspd_addr_len);
 	if(status < 0)
 	{
-		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: DC%d> failed to accept a connection from a datacenter (errno: %s)\n", 
+		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: dc%d> failed to accept a connection from a datacenter (errno: %s)\n", 
 			err_m, this_clk.clk, fnc_m, src_id, 1);
 		pthread_exit((void *)thread_rets);
 	}
 	dc_rspd_sock_fd = status;
 	dc_lstn_sock_hndl[src_id-1] = dc_lstn_sock_fd;
 	dc_rspd_sock_hndl[src_id-1] = dc_rspd_sock_fd;
-	dc_log(stdout, "%s%d%s (%s) <target: DC%d> accepted a new datacenter connection\n", 
+	dc_log(stdout, "%s%d%s (%s) <target: dc%d> accepted a new datacenter connection\n", 
 		log_m, this_clk.clk, fnc_m, src_id, 0);
 
 	//recv a packet confirming online datacenter state
 	status = recv(dc_rspd_sock_fd, packet_stream, sizeof(packet_t), 0);
 	if(status != sizeof(packet_t))
 	{
-		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: DC%d> encountered an issue while receving the ONLINE packet (errno: %d)\n", 
+		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: dc%d> encountered an issue while receving the ONLINE packet (errno: %d)\n", 
 			err_m, this_clk.clk, fnc_m, src_id, 1);
 		pthread_exit((void *)thread_rets);
 	}
@@ -578,12 +579,12 @@ void *dc_lstn_thread(void *args)
 	if(packet->id != src_id || packet->type != ONLINE)
 	{
 		pthread_mutex_unlock(&(this_clk.lock));
-		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: DC%d> received an invalid ONLINE packet\n", 
+		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: dc%d> received an invalid ONLINE packet\n", 
 			err_m, this_clk.clk, fnc_m, src_id, 0);
 		pthread_mutex_unlock(&(ticket_pool.lock));
 		pthread_exit((void *)thread_rets);
 	}
-	dc_log(stdout, "%s%d%s (%s) <target: DC%d> received packet: ONLINE\n", 
+	dc_log(stdout, "%s%d%s (%s) <target: dc%d> received packet: ONLINE\n", 
 		log_m, this_clk.clk, fnc_m, src_id, 0);
 	free(packet);
 
@@ -593,13 +594,13 @@ void *dc_lstn_thread(void *args)
 	if(status != sizeof(packet_t))
 	{
 		pthread_mutex_unlock(&(this_clk.lock));
-		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: DC%d> encountered an issue while sending the ACK (ONLINE) packet (errno: %s)\n", 
+		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: dc%d> encountered an issue while sending the ACK (ONLINE) packet (errno: %s)\n", 
 			err_m, this_clk.clk, fnc_m, src_id, 1);
 		pthread_mutex_unlock(&(ticket_pool.lock));
 		pthread_exit((void *)thread_rets);
 	}
 	delay(msg_delay);
-	dc_log(stdout, "%s%d%s (%s) <target: DC%d> sent packet: ACK (ONLINE)\n", 
+	dc_log(stdout, "%s%d%s (%s) <target: dc%d> sent packet: ACK (ONLINE)\n", 
 		log_m, this_clk.clk, fnc_m, src_id, 0);
 	free(packet_stream);
 	pthread_mutex_lock(&(dc_sys[src_id-1].lock));
@@ -611,14 +612,14 @@ void *dc_lstn_thread(void *args)
 	//continuosly handle request/release messages from another datacenter
 	while(1)
 	{
-		dc_log(stdout, "%s%d%s (%s) <target: DC%d> handle request/release ipc\n", 
+		dc_log(stdout, "%s%d%s (%s) <target: dc%d> handle request/release ipc\n", 
 			log_m, this_clk.clk, fnc_m, src_id, 0);
 
 		//receive the request packet to grant control of the ticket pool
 		status = recv(dc_rspd_sock_fd, packet_stream, sizeof(packet_t), 0);
 		if(status != sizeof(packet_t))
 		{
-			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: DC%d> encountered an issue while receving the REQUEST packet (errno: %d)\n", 
+			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: dc%d> encountered an issue while receving the REQUEST packet (errno: %d)\n", 
 				err_m, this_clk.clk, fnc_m, src_id, 1);
 			pthread_exit((void *)thread_rets);
 		}
@@ -631,12 +632,12 @@ void *dc_lstn_thread(void *args)
 		if(packet->id != src_id || packet->type != REQUEST)
 		{
 			pthread_mutex_unlock(&(this_clk.lock));
-			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: DC%d> received an invalid REQUEST packet\n", 
+			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: dc%d> received an invalid REQUEST packet\n", 
 				err_m, this_clk.clk, fnc_m, src_id, 0);
 			pthread_mutex_unlock(&(ticket_pool.lock));
 			pthread_exit((void *)thread_rets);
 		}
-		dc_log(stdout, "%s%d%s (%s) <target: DC%d> received packet: REQUEST\n", 
+		dc_log(stdout, "%s%d%s (%s) <target: dc%d> received packet: REQUEST\n", 
 			log_m, this_clk.clk, fnc_m, src_id, 0);
 
 		//sort request into the queue
@@ -693,7 +694,7 @@ void *dc_lstn_thread(void *args)
 				continue;
 			}
 		}
-		fprintf(stdout, "%s%d%s (%s) <target: DC%d> packet with <clk:%d, id:%d> was sorted into the queue at position %d\n", 
+		fprintf(stdout, "%s%d%s (%s) <target: dc%d> packet with <clk:%d, id:%d> was sorted into the queue at position %d\n", 
 			log_m, this_clk.clk, cls_m, fnc_m, src_id, packet->clk, packet->id, pos);
 		pthread_mutex_unlock(&(rq.lock));
 
@@ -709,14 +710,14 @@ void *dc_lstn_thread(void *args)
 		if(status != sizeof(packet_t))
 		{
 			pthread_mutex_unlock(&(this_clk.lock));
-			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: DC%d> encountered an issue while sending the ACK (REQUEST) packet (errno: %s)\n", 
+			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: dc%d> encountered an issue while sending the ACK (REQUEST) packet (errno: %s)\n", 
 				err_m, this_clk.clk, fnc_m, src_id, 1);
 			pthread_mutex_unlock(&(ticket_pool.lock));
 			pthread_exit((void *)thread_rets);
 		}
 		delay(msg_delay);
 		free(packet_stream);
-		dc_log(stdout, "%s%d%s (%s) <target: DC%d> sent packet: ACK (REQUEST)\n", 
+		dc_log(stdout, "%s%d%s (%s) <target: dc%d> sent packet: ACK (REQUEST)\n", 
 			log_m, this_clk.clk, fnc_m, src_id, 0);
 		pthread_mutex_unlock(&(this_clk.lock));
 		pthread_mutex_unlock(&(ticket_pool.lock));
@@ -725,7 +726,7 @@ void *dc_lstn_thread(void *args)
 		status = recv(dc_rspd_sock_fd, packet_stream, sizeof(packet_t), 0);
 		if(status != sizeof(packet_t))
 		{
-			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: DC%d> encountered an issue while receving the RELEASE packet (errno: %d)\n", 
+			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: dc%d> encountered an issue while receving the RELEASE packet (errno: %d)\n", 
 				err_m, this_clk.clk, fnc_m, src_id, 1);
 			pthread_exit((void *)thread_rets);
 		}
@@ -738,16 +739,16 @@ void *dc_lstn_thread(void *args)
 		if(packet->id != src_id || packet->type != RELEASE)
 		{
 			pthread_mutex_unlock(&(this_clk.lock));
-			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: DC%d> received an invalid RELEASE packet\n", 
+			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: dc%d> received an invalid RELEASE packet\n", 
 				err_m, this_clk.clk, fnc_m, src_id, 0);
 			pthread_mutex_unlock(&(ticket_pool.lock));
 			pthread_exit((void *)thread_rets);
 		}
-		dc_log(stdout, "%s%d%s (%s) <target: DC%d> received packet: RELEASE\n", 
+		dc_log(stdout, "%s%d%s (%s) <target: dc%d> received packet: RELEASE\n", 
 			log_m, this_clk.clk, fnc_m, src_id, 0);
 
 		//pop the head of the queue since it has completed
-		fprintf(stdout, "%s%d%s (%s) <target: DC%d> packet with <clk:%d, id:%d> is now being popped off the head of the queue\n", 
+		fprintf(stdout, "%s%d%s (%s) <target: dc%d> packet with <clk:%d, id:%d> is now being popped off the head of the queue\n", 
 			log_m, this_clk.clk, cls_m, fnc_m, src_id, rq.requests[0].clk, rq.requests[0].id);
 		pthread_mutex_lock(&(rq.lock));
 		for(i = 0; i < rq.size-1; i++)
@@ -764,7 +765,7 @@ void *dc_lstn_thread(void *args)
 
 		//update the pool with its new amount
 		ticket_pool.pool = packet->pool;
-		fprintf(stdout, "%s%d%s (%s) <target: DC%d> the pool has been updated to contain %d tickets left\n", 
+		fprintf(stdout, "%s%d%s (%s) <target: dc%d> the pool has been updated to contain %d tickets left\n", 
 			log_m, this_clk.clk, cls_m, fnc_m, src_id, ticket_pool.pool);
 		free(packet);
 
@@ -776,14 +777,14 @@ void *dc_lstn_thread(void *args)
 		if(status != sizeof(packet_t))
 		{
 			pthread_mutex_unlock(&(this_clk.lock));
-			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: DC%d> encountered an issue while sending the ACK (RELEASE) packet (errno: %s)\n", 
+			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: dc%d> encountered an issue while sending the ACK (RELEASE) packet (errno: %s)\n", 
 				err_m, this_clk.clk, fnc_m, src_id, 1);
 			pthread_mutex_unlock(&(ticket_pool.lock));
 			pthread_exit((void *)thread_rets);
 		}
 		delay(msg_delay);
 		free(packet_stream);
-		dc_log(stdout, "%s%d%s (%s) <target: DC%d> sent packet: ACK (RELEASE)\n", 
+		dc_log(stdout, "%s%d%s (%s) <target: dc%d> sent packet: ACK (RELEASE)\n", 
 			log_m, this_clk.clk, fnc_m, src_id, 0);
 		pthread_mutex_unlock(&(this_clk.lock));
 		pthread_mutex_unlock(&(ticket_pool.lock));
@@ -793,11 +794,11 @@ void *dc_lstn_thread(void *args)
 	status = close(dc_lstn_sock_fd);
 	if(status < 0)
 	{
-		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: DC%d> failed to cleanly close the datacenter's socket for requests/releases (errno: %s)\n", 
+		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: dc%d> failed to cleanly close the datacenter's socket for requests/releases (errno: %s)\n", 
 			err_m, this_clk.clk, fnc_m, src_id, 1);
 		pthread_exit((void *)thread_rets);
 	}
-	dc_log(stdout, "%s%d%s (%s) <target: DC%d> closed the datacenter's socket for datacenter requests/releases\n", 
+	dc_log(stdout, "%s%d%s (%s) <target: dc%d> closed the datacenter's socket for datacenter requests/releases\n", 
 		log_m, this_clk.clk, fnc_m, src_id, 0);
 
 	fflush_out_err();
@@ -841,12 +842,12 @@ void *dc_bcst_thread(void *args)
 	status = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	if(status < 0)
 	{
-		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: DC%d> failed to open a socket (errno: %s)\n", 
+		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: dc%d> failed to open a socket (errno: %s)\n", 
 			err_m, this_clk.clk, fnc_m, dst_id, 1);
 		pthread_exit((void *)thread_rets);
 	}
 	dc_bcst_sock_fd = status;
-	dc_log(stdout, "%s%d%s (%s) <target: DC%d> finished initializing a socket for an outgoing server connection\n", 
+	dc_log(stdout, "%s%d%s (%s) <target: dc%d> finished initializing a socket for an outgoing server connection\n", 
 		log_m, this_clk.clk, fnc_m, dst_id, 0);
 
 	//connect to the datacenter
@@ -856,12 +857,12 @@ void *dc_bcst_thread(void *args)
 		//datacenter was offline
 		if(errno == 111)
 		{
-			thread_rets->ret = dc_log(stdout, "%s%d%s (%s) <target: DC%d> could not connect to offline datacenter\n", 
+			thread_rets->ret = dc_log(stdout, "%s%d%s (%s) <target: dc%d> could not connect to offline datacenter\n", 
 				log_m, this_clk.clk, fnc_m, dst_id, 0);
 		}
 		else
 		{
-			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: DC%d> failed to connect to the datacenter server (errno: %s)\n", 
+			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: dc%d> failed to connect to the datacenter server (errno: %s)\n", 
 				err_m, this_clk.clk, fnc_m, dst_id, 1);
 		}	
 		pthread_mutex_lock(&(dc_sys[dst_id-1].lock));
@@ -882,7 +883,7 @@ void *dc_bcst_thread(void *args)
 	if(status != sizeof(packet_t))
 	{
 		pthread_mutex_unlock(&(this_clk.lock));
-		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: DC%d> encountered an issue while sending the online packet (errno: %s)\n", 
+		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: dc%d> encountered an issue while sending the online packet (errno: %s)\n", 
 			err_m, this_clk.clk, fnc_m, dst_id, 1);
 		pthread_mutex_unlock(&(ticket_pool.lock));
 		pthread_mutex_unlock(&dc_bcst_lock);
@@ -890,7 +891,7 @@ void *dc_bcst_thread(void *args)
 	}
 	delay(msg_delay);
 	free(packet_stream);
-	dc_log(stdout, "%s%d%s (%s) <target: DC%d> sent packet: ONLINE\n", 
+	dc_log(stdout, "%s%d%s (%s) <target: dc%d> sent packet: ONLINE\n", 
 		log_m, this_clk.clk, fnc_m, dst_id, 0);
 	pthread_mutex_unlock(&(this_clk.lock));
 	pthread_mutex_unlock(&(ticket_pool.lock));
@@ -899,7 +900,7 @@ void *dc_bcst_thread(void *args)
 	status = recv(dc_bcst_sock_fd, packet_stream, sizeof(packet_t), 0);
 	if(status != sizeof(packet_t))
 	{
-		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: DC%d> encountered an issue while receving the ack packet for the online packet (errno: %d)\n", 
+		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: dc%d> encountered an issue while receving the ack packet for the online packet (errno: %d)\n", 
 			err_m, this_clk.clk, fnc_m, dst_id, 1);
 		pthread_mutex_unlock(&dc_bcst_lock);
 		pthread_exit((void *)thread_rets);
@@ -913,14 +914,14 @@ void *dc_bcst_thread(void *args)
 	if(packet->id != dst_id || packet->type != ACK)
 	{
 		pthread_mutex_unlock(&(this_clk.lock));
-		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: DC%d> received an invalid ack packet for the online packet\n", 
+		thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: dc%d> received an invalid ack packet for the online packet\n", 
 			err_m, this_clk.clk, fnc_m, dst_id, 0);
 		pthread_mutex_unlock(&(ticket_pool.lock));
 		pthread_mutex_unlock(&dc_bcst_lock);
 		pthread_exit((void *)thread_rets);
 	}
 	free(packet);
-	dc_log(stdout, "%s%d%s (%s) <target: DC%d> received packet: ACK (ONLINE)\n", 
+	dc_log(stdout, "%s%d%s (%s) <target: dc%d> received packet: ACK (ONLINE)\n", 
 		log_m, this_clk.clk, fnc_m, dst_id, 0);
 	pthread_mutex_lock(&(dc_sys[dst_id-1].lock));
 	dc_sys[dst_id-1].online = 1;
@@ -933,13 +934,13 @@ void *dc_bcst_thread(void *args)
 	//handle request/release communication per client transaction
 	while(1)
 	{
-		dc_log(stdout, "%s%d%s (%s) <target: DC%d> begin handling request/release ipc\n", 
+		dc_log(stdout, "%s%d%s (%s) <target: dc%d> begin handling request/release ipc\n", 
 			log_m, this_clk.clk, fnc_m, dst_id, 0);
 		pthread_mutex_lock(&bcst_lock);
 		if(quit_sig == 1)
 		{
 			pthread_mutex_lock(&(this_clk.lock));
-			thread_rets->ret = dc_log(stdout, "%s%d%s (%s) <target: DC%d> shutting down thread\n", 
+			thread_rets->ret = dc_log(stdout, "%s%d%s (%s) <target: dc%d> shutting down thread\n", 
 				log_m, this_clk.clk, fnc_m, dst_id, 0);
 			pthread_mutex_unlock(&(this_clk.lock));
 			pthread_exit((void *)thread_rets);
@@ -1015,7 +1016,7 @@ void *dc_bcst_thread(void *args)
 					continue;
 				}
 			}
-			fprintf(stdout, "%s%d%s (%s) <target: DC%d> packet with <clk:%d, id:%d> was sorted into the local queue at position %d\n", 
+			fprintf(stdout, "%s%d%s (%s) <target: dc%d> packet with <clk:%d, id:%d> was sorted into the local queue at position %d\n", 
 				log_m, this_clk.clk, cls_m, fnc_m, dst_id, this_clk.clk, this_dc.id, pos);
 		}
 		pthread_mutex_unlock(&(rq.lock));
@@ -1025,14 +1026,14 @@ void *dc_bcst_thread(void *args)
 		if(status != sizeof(packet_t))
 		{
 			pthread_mutex_unlock(&(this_clk.lock));
-			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: DC%d> encountered an issue while sending the REQUEST packet (errno: %s)\n", 
+			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: dc%d> encountered an issue while sending the REQUEST packet (errno: %s)\n", 
 				err_m, this_clk.clk, fnc_m, dst_id, 1);
 			pthread_mutex_unlock(&(ticket_pool.lock));
 			pthread_exit((void *)thread_rets);
 		}
 		delay(msg_delay);
 		free(packet_stream);
-		dc_log(stdout, "%s%d%s (%s) <target: DC%d> sent packet: REQUEST\n", 
+		dc_log(stdout, "%s%d%s (%s) <target: dc%d> sent packet: REQUEST\n", 
 			log_m, this_clk.clk, fnc_m, dst_id, 0);
 		pthread_mutex_unlock(&(this_clk.lock));
 		pthread_mutex_unlock(&(ticket_pool.lock));
@@ -1041,7 +1042,7 @@ void *dc_bcst_thread(void *args)
 		status = recv(dc_bcst_sock_fd, packet_stream, sizeof(packet_t), 0);
 		if(status != sizeof(packet_t))
 		{
-			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: DC%d> encountered an issue while receving the ACK (REQUEST) packet (errno: %d)\n", 
+			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: dc%d> encountered an issue while receving the ACK (REQUEST) packet (errno: %d)\n", 
 				err_m, this_clk.clk, fnc_m, dst_id, 1);
 			pthread_exit((void *)thread_rets);
 		}
@@ -1054,13 +1055,21 @@ void *dc_bcst_thread(void *args)
 		if(packet->id != dst_id || packet->type != ACK)
 		{
 			pthread_mutex_unlock(&(this_clk.lock));
-			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: DC%d> received an invalid ACK (REQUEST) packet\n", 
+			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: dc%d> received an invalid ACK (REQUEST) packet\n", 
 				err_m, this_clk.clk, fnc_m, dst_id, 0);
 			pthread_mutex_unlock(&(ticket_pool.lock));
 			pthread_exit((void *)thread_rets);
 		}
-		dc_log(stdout, "%s%d%s (%s) <target: DC%d> received packet: ACK (REQUEST)\n", 
+		dc_log(stdout, "%s%d%s (%s) <target: dc%d> received packet: ACK (REQUEST)\n", 
 			log_m, this_clk.clk, fnc_m, dst_id, 0);
+
+		//update clk upon receipt of request
+		if(sync_clk)
+		{
+			this_clk.clk = max_clk(this_clk.clk, packet->clk);
+			sync_clk = 0;
+		}
+		free(packet);
 
 		pthread_mutex_unlock(&(this_clk.lock));
 		pthread_mutex_unlock(&(ticket_pool.lock));
@@ -1071,15 +1080,11 @@ void *dc_bcst_thread(void *args)
 		if(quit_sig == 1)
 		{
 			pthread_mutex_lock(&(this_clk.lock));
-			thread_rets->ret = dc_log(stdout, "%s%d%s (%s) <target: DC%d> shutting down thread\n", 
+			thread_rets->ret = dc_log(stdout, "%s%d%s (%s) <target: dc%d> shutting down thread\n", 
 				log_m, this_clk.clk, fnc_m, dst_id, 0);
 			pthread_mutex_unlock(&this_clk.lock);
 			pthread_exit((void *)thread_rets);
 		}
-
-		//update clk upon receipt of request
-		this_clk.clk = max_clk(this_clk.clk, packet->clk);
-		free(packet);
 
 		//build a packet signaling this datacenter is releasing control of the ticket pool
 		pthread_mutex_lock(&(ticket_pool.lock));
@@ -1095,7 +1100,7 @@ void *dc_bcst_thread(void *args)
 		}
 		if(on_queue)
 		{
-			fprintf(stdout, "%s%d%s (%s) <target: DC%d> packet with <clk: %d, id: %d> is now being popped off the head of the queue\n", 
+			fprintf(stdout, "%s%d%s (%s) <target: dc%d> packet with <clk: %d, id: %d> is now being popped off the head of the queue\n", 
 				log_m, this_clk.clk, cls_m, fnc_m, dst_id, rq.requests[0].clk, rq.requests[0].id);
 			for(i = 0; i < rq.size-1; i++)
 			{
@@ -1112,14 +1117,14 @@ void *dc_bcst_thread(void *args)
 		if(status != sizeof(packet_t))
 		{
 			pthread_mutex_unlock(&(this_clk.lock));
-			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: DC%d> encountered an issue while sending the release packet (errno: %s)\n", 
+			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: dc%d> encountered an issue while sending the release packet (errno: %s)\n", 
 				err_m, this_clk.clk, fnc_m, dst_id, 1);
 			pthread_mutex_unlock(&(ticket_pool.lock));
 			pthread_exit((void *)thread_rets);
 		}
 		delay(msg_delay);
 		free(packet_stream);
-		dc_log(stdout, "%s%d%s (%s) <target: DC%d> sent packet: RELEASE\n", 
+		dc_log(stdout, "%s%d%s (%s) <target: dc%d> sent packet: RELEASE\n", 
 			log_m, this_clk.clk, fnc_m, dst_id, 0);
 		pthread_mutex_unlock(&(this_clk.lock));
 		pthread_mutex_unlock(&(ticket_pool.lock));
@@ -1128,7 +1133,7 @@ void *dc_bcst_thread(void *args)
 		status = recv(dc_bcst_sock_fd, packet_stream, sizeof(packet_t), 0);
 		if(status != sizeof(packet_t))
 		{
-			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: DC%d> encountered an issue while receving the ack packet for the release packet (errno: %d)\n", 
+			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: dc%d> encountered an issue while receving the ack packet for the release packet (errno: %d)\n", 
 				err_m, this_clk.clk, fnc_m, dst_id, 1);
 			pthread_exit((void *)thread_rets);
 		}
@@ -1141,13 +1146,13 @@ void *dc_bcst_thread(void *args)
 		if(packet->id != dst_id || packet->type != ACK)
 		{
 			pthread_mutex_unlock(&(this_clk.lock));
-			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: DC%d> received an invalid ack packet for the release packet\n", 
+			thread_rets->ret = dc_log(stderr, "%s%d%s (%s) <target: dc%d> received an invalid ack packet for the release packet\n", 
 				err_m, this_clk.clk, fnc_m, dst_id, 0);
 			pthread_mutex_unlock(&(ticket_pool.lock));
 			pthread_exit((void *)thread_rets);
 		}
 		free(packet);
-		dc_log(stdout, "%s%d%s (%s) <target: DC%d> received packet: ACK (RELEASE)\n", 
+		dc_log(stdout, "%s%d%s (%s) <target: dc%d> received packet: ACK (RELEASE)\n", 
 			log_m, this_clk.clk, fnc_m, dst_id, 0);
 		pthread_mutex_unlock(&(this_clk.lock));
 		pthread_mutex_unlock(&(ticket_pool.lock));
@@ -1298,7 +1303,12 @@ void *cl_lstn_thread(void *args)
 		{
 			pthread_mutex_unlock(&bcst_lock);
 			pthread_mutex_lock(&pool_lock);
+			if(i == dc_sys_online-2)
+			{
+				sync_clk = 1;
+			}
 		}
+		sync_clk = 0;
 
 		//make sure it is scheduled at the head of the queue
 		if(dc_sys_online > 0)

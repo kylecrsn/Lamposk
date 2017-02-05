@@ -25,6 +25,7 @@ int32_t cl_rspd_sock_hndl;
 int32_t quit_sig;
 int32_t msg_delay;
 int32_t dc_sys_online;
+int32_t sync_clk;
 req_queue_t rq;
 pool_t ticket_pool;
 clk_t this_clk;
