@@ -1,5 +1,5 @@
-# Ciosk
-A C implementation of a distributed ticketing kiosk system based on [Lamport's Timestamp Algoirthm](http://lamport.azurewebsites.net/pubs/time-clocks.pdf)
+# Lamposk
+A C implementation of a distributed ticketing kiosk system based on [Lamport's Distributed Solution](http://lamport.azurewebsites.net/pubs/time-clocks.pdf)
 
 ## About
 #### Assumptions

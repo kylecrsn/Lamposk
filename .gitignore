@@ -29,6 +29,7 @@
 *.dylib
 
 # Executables
+lamposk
 *.exe
 *.out
 *.app

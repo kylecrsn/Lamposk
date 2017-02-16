@@ -1,24 +1,20 @@
-TARGET=ciosk
-CC=gcc
-CFLAGS=-g -Wall
-LIBS=-pthread -lconfig
+TARGET = lamposk
+CC = gcc
+CFLAGS = -g -Wall
+LIBS = -pthread -lconfig
+
+.PRECIOUS: $(TARGET) $(OBJECTS)
+OBJECTS = $(patsubst %.c,%.o,$(wildcard *.c))
+HEADERS = $(wildcard *.h)
 
 .PHONY: default all clean
-
 default: $(TARGET)
 all: default
-
-OBJECTS = $(patsubst %.c, %.o, $(wildcard *.c))
-HEADERS = $(wildcard *.h)
+clean:
+	-rm -f *.o $(TARGET)
 
 %.o: %.c $(HEADERS)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-.PRECIOUS: $(TARGET) $(OBJECTS)
-
 $(TARGET): $(OBJECTS)
 	$(CC) $(OBJECTS) -Wall $(LIBS) -o $@
-
-clean:
-	-rm -f *.o
-	-rm -f $(TARGET)
